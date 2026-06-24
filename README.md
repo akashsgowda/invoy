@@ -4,6 +4,18 @@ Invoy is an open-source Flutter invoice app for quick offline billing. It helps
 small businesses and freelancers create invoices, track payment status, manage
 clients, export backups, and generate shareable invoice PDFs.
 
+<p align="center">
+  <a href="https://github.com/akashsgowda/invoy/releases/latest">
+    <img src="https://img.shields.io/badge/Download%20APK-Invoy%20v1.0.0-black?style=for-the-badge&logo=android" alt="Download Invoy APK">
+  </a>
+</p>
+
+<p align="center">
+  <b>Download the latest Android APK from GitHub Releases.</b>
+</p>
+
+**Download:** https://github.com/akashsgowda/invoy/releases/latest
+
 The maintained platform target is Android. Generated builds, APKs, local app
 data, signing keys, and exported PDFs are intentionally kept out of source
 control.
