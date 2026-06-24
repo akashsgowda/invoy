@@ -7,6 +7,11 @@ import '../pdf_builder.dart';
 import 'client_form.dart';
 import 'pdf_preview_page.dart';
 
+String _pct(double value) {
+  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+  return value.toStringAsFixed(1);
+}
+
 // ════════════════════════════════════════════════════════════════
 // CREATE PAGE  —  Quick Invoice
 // ════════════════════════════════════════════════════════════════
@@ -211,8 +216,8 @@ class _CreatePageState extends State<CreatePage> {
                   const SizedBox(height: 8),
                   _amtRow(
                       inv.splitGst
-                          ? 'Tax (CGST ${(inv.gst / 2).toStringAsFixed(0)}% + SGST ${(inv.gst / 2).toStringAsFixed(0)}%)'
-                          : 'Tax (GST ${inv.gst.toStringAsFixed(0)}%)',
+                          ? 'Tax (CGST ${_pct(inv.gst / 2)}% + SGST ${_pct(inv.gst / 2)}%)'
+                          : 'Tax (GST ${_pct(inv.gst)}%)',
                       amtUi(inv.tax),
                       true),
                 ],
@@ -528,9 +533,9 @@ class _MoreOptionsPageState extends State<_MoreOptionsPage> {
   String get _gstLabel {
     if (inv.gst == 0) return 'No GST';
     if (inv.splitGst) {
-      return '${inv.gst.toStringAsFixed(0)}% (CGST ${(inv.gst / 2).toStringAsFixed(0)}% + SGST ${(inv.gst / 2).toStringAsFixed(0)}%)';
+      return '${_pct(inv.gst)}% (CGST ${_pct(inv.gst / 2)}% + SGST ${_pct(inv.gst / 2)}%)';
     }
-    return '${inv.gst.toStringAsFixed(0)}%';
+    return '${_pct(inv.gst)}%';
   }
 
   String get _termsLabel {
