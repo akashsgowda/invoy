@@ -1,0 +1,328 @@
+import 'package:flutter/material.dart';
+import '../theme.dart';
+import '../models.dart';
+import '../widgets.dart';
+import 'create.dart';
+import 'detail.dart';
+
+class ClientDetailPage extends StatefulWidget {
+  final String name, email, phone, address, gstin;
+  final VoidCallback onRefresh;
+  const ClientDetailPage({
+    super.key,
+    required this.name,
+    required this.email,
+    required this.phone,
+    required this.address,
+    this.gstin = '',
+    required this.onRefresh,
+  });
+  @override
+  State<ClientDetailPage> createState() => _ClientDetailPageState();
+}
+
+class _ClientDetailPageState extends State<ClientDetailPage> {
+  List<Invoice> get _invoices =>
+      Store.i.all.where((i) => i.client.name == widget.name).toList();
+
+  double get _totalInvoiced => _invoices.fold(0, (s, i) => s + i.total);
+
+  double get _totalRevenue => _invoices.fold(0, (s, i) => s + i.collectedAmt);
+
+  double get _outstanding => _invoices
+      .where((i) => i.displayStatus != Status.paid)
+      .fold(0, (s, i) => s + i.balance);
+
+  String get _initials {
+    final parts =
+        widget.name.trim().split(' ').where((w) => w.isNotEmpty).toList();
+    if (parts.length >= 2) {
+      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    }
+    return widget.name.isEmpty ? '?' : widget.name[0].toUpperCase();
+  }
+
+  Color get _avatarColor =>
+      C.avatarColors[widget.name.hashCode.abs() % C.avatarColors.length];
+
+  void _newInvoice() {
+    Store.i.create().then((inv) {
+      inv.client = Customer(
+          name: widget.name,
+          email: widget.email,
+          phone: widget.phone,
+          address: widget.address,
+          gstin: widget.gstin);
+      if (!mounted) return;
+      Navigator.push(
+          context,
+          slideRoute(CreatePage(
+            invoice: inv,
+            onSaved: (v) {
+              Store.i.add(v);
+              setState(() {});
+              widget.onRefresh();
+            },
+          )));
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final invoices = _invoices;
+
+    return Scaffold(
+      backgroundColor: T.bg(context),
+      appBar: AppBar(
+        backgroundColor: T.bg(context),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leading: IconButton(
+          tooltip: 'Back',
+          onPressed: () => Navigator.pop(context),
+          icon:
+              Icon(Icons.arrow_back_rounded, size: 18, color: T.text(context)),
+        ),
+        title: Text('Client',
+            style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: T.text(context))),
+        centerTitle: true,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.only(bottom: 120),
+        children: [
+          // ── Header ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 28),
+            child: Column(children: [
+              CircleAvatar(
+                radius: 32,
+                backgroundColor: _avatarColor,
+                child: Text(_initials,
+                    style: const TextStyle(
+                        color: C.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(height: 16),
+              Text(widget.name,
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: T.text(context),
+                      letterSpacing: 0)),
+              if (widget.email.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(widget.email,
+                    style: TextStyle(fontSize: 13, color: T.muted(context))),
+              ],
+              if (widget.phone.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(widget.phone,
+                    style: TextStyle(fontSize: 13, color: T.muted(context))),
+              ],
+            ]),
+          ),
+
+          // ── Statement ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: _statementCard(),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── Contact info ──
+          if (widget.address.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Container(
+                decoration: BoxDecoration(
+                    color: T.card(context),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: T.border(context), width: 0.5)),
+                child: Column(children: [
+                  if (widget.email.isNotEmpty)
+                    _infoRow(Icons.mail_outline_rounded, widget.email),
+                  if (widget.email.isNotEmpty && widget.address.isNotEmpty)
+                    Divider(height: 1, color: T.divider(context), indent: 52),
+                  if (widget.address.isNotEmpty)
+                    _infoRow(Icons.location_on_outlined, widget.address),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+
+          // ── Invoices ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: Text('Invoices',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: T.muted(context),
+                    letterSpacing: 0.2)),
+          ),
+          if (invoices.isEmpty)
+            const EmptyState(
+              icon: Icons.receipt_long_outlined,
+              message: 'No invoices for this client',
+              subtitle: 'Create an invoice when work starts.',
+            )
+          else
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              decoration: BoxDecoration(
+                  color: T.card(context),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: T.border(context), width: 0.5)),
+              child: Column(
+                children: invoices.asMap().entries.map((e) {
+                  final inv = e.value;
+                  final isLast = e.key == invoices.length - 1;
+                  return Column(children: [
+                    InkWell(
+                      onTap: () => Navigator.push(
+                          context,
+                          slideRoute(DetailPage(
+                              invoice: inv, onRefresh: () => setState(() {})))),
+                      borderRadius: BorderRadius.circular(14),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                        child: Row(children: [
+                          Expanded(
+                              child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(inv.num,
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: T.text(context))),
+                              const SizedBox(height: 4),
+                              Text(
+                                  inv.isPartPaid
+                                      ? '${amtK(inv.balance)} balance due'
+                                      : inv.dueDateText,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: inv.displayStatus == Status.overdue
+                                          ? C.overdue
+                                          : T.muted(context))),
+                            ],
+                          )),
+                          Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                    inv.isPartPaid
+                                        ? amtK(inv.balance)
+                                        : amtK(inv.total),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: T.text(context))),
+                                const SizedBox(height: 5),
+                                StatusPill(inv: inv),
+                              ]),
+                        ]),
+                      ),
+                    ),
+                    if (!isLast)
+                      Divider(height: 1, color: T.divider(context), indent: 16),
+                  ]);
+                }).toList(),
+              ),
+            ),
+        ],
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          child: ElevatedButton(
+            onPressed: _newInvoice,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: T.inverse(context),
+              foregroundColor: T.onInverse(context),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              elevation: 0,
+            ),
+            child: const Text('Create Invoice',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _statementCard() => Container(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 15),
+        decoration: BoxDecoration(
+            color: T.card(context),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: T.border(context), width: 0.5)),
+        child: Column(children: [
+          Row(children: [
+            Text('Statement',
+                style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: T.text(context))),
+            const Spacer(),
+            Text(
+                '${_invoices.length} invoice${_invoices.length == 1 ? '' : 's'}',
+                style: TextStyle(fontSize: 12, color: T.muted(context))),
+          ]),
+          const SizedBox(height: 14),
+          _statementRow('Billed', amtUi(_totalInvoiced)),
+          const SizedBox(height: 9),
+          _statementRow('Received', amtUi(_totalRevenue)),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Divider(height: 1, color: T.divider(context)),
+          ),
+          _statementRow('Balance', amtUi(_outstanding), strong: true),
+        ]),
+      );
+
+  Widget _statementRow(String label, String value, {bool strong = false}) =>
+      Row(children: [
+        Text(label,
+            style: TextStyle(
+                fontSize: strong ? 14 : 13,
+                fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
+                color: strong ? T.text(context) : T.muted(context))),
+        const Spacer(),
+        Flexible(
+          child: Text(value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                  fontSize: strong ? 15 : 13,
+                  fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
+                  color: strong && _outstanding > 0
+                      ? T.text(context)
+                      : T.text(context))),
+        ),
+      ]);
+
+  Widget _infoRow(IconData icon, String text) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(children: [
+          Icon(icon, size: 16, color: T.muted(context)),
+          const SizedBox(width: 14),
+          Expanded(
+              child: Text(text,
+                  style: TextStyle(fontSize: 13, color: T.text(context)))),
+        ]),
+      );
+}
