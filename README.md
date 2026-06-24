@@ -16,6 +16,15 @@ clients, export backups, and generate shareable invoice PDFs.
 
 **Download:** https://github.com/akashsgowda/invoy/releases/latest/download/Invoy-v1.0.0.apk
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/dashboard-light.png" alt="Invoy dashboard in light theme" width="180">
+  <img src="docs/screenshots/invoices-light.png" alt="Invoy invoices list in light theme" width="180">
+  <img src="docs/screenshots/clients-light.png" alt="Invoy clients list in light theme" width="180">
+  <img src="docs/screenshots/dashboard-dark.png" alt="Invoy dashboard in dark theme" width="180">
+</p>
+
 The maintained platform target is Android. Generated builds, APKs, local app
 data, signing keys, and exported PDFs are intentionally kept out of source
 control.
