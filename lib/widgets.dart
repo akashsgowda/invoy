@@ -258,7 +258,9 @@ class StatusPill extends StatelessWidget {
 
   Color _fg(BuildContext context) {
     if (emphatic) return inv.statusColor;
-    if (inv.displayStatus == Status.overdue) return C.overdue;
+    if (inv.displayStatus != Status.draft || inv.isPartPaid) {
+      return inv.statusColor;
+    }
     return T.muted(context);
   }
 
