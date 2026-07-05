@@ -35,8 +35,9 @@ void main() {
         notes: 'Payment accepted by UPI or bank transfer.',
       );
 
-      final bytes =
-          await buildPdf(invoice).timeout(const Duration(seconds: 12));
+      final bytes = await buildPdf(
+        invoice,
+      ).timeout(const Duration(seconds: 12));
       expect(bytes.length, greaterThan(1000), reason: template.name);
     }
   });
@@ -50,9 +51,7 @@ void main() {
       id: 'upi-test',
       num: 'INV-UPI',
       client: Customer(name: 'Example Client Studio'),
-      items: [
-        LineItem(id: '1', desc: 'Brand kit', qty: 1, rate: 24500),
-      ],
+      items: [LineItem(id: '1', desc: 'Brand kit', qty: 1, rate: 24500)],
       status: Status.pending,
     );
 
@@ -70,9 +69,7 @@ void main() {
       id: 'upi-image-test',
       num: 'INV-UPI-IMAGE',
       client: Customer(name: 'Example Client Studio'),
-      items: [
-        LineItem(id: '1', desc: 'Brand kit', qty: 1, rate: 24500),
-      ],
+      items: [LineItem(id: '1', desc: 'Brand kit', qty: 1, rate: 24500)],
       status: Status.pending,
     );
 
@@ -135,8 +132,9 @@ void main() {
         ],
       );
 
-      final bytes =
-          await buildPdf(invoice).timeout(const Duration(seconds: 12));
+      final bytes = await buildPdf(
+        invoice,
+      ).timeout(const Duration(seconds: 12));
       expect(bytes.length, greaterThan(1000), reason: template.name);
     }
   });

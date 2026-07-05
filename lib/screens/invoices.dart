@@ -28,7 +28,9 @@ class _InvoicesPageState extends State<InvoicesPage> {
   void initState() {
     super.initState();
     _tab = widget.initialTab.clamp(0, 3);
-    _searchFocus.addListener(() => setState(() {}));
+    _searchFocus.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -47,12 +49,14 @@ class _InvoicesPageState extends State<InvoicesPage> {
   }
 
   void _r() {
+    if (!mounted) return;
     widget.onRefresh();
     setState(() {});
   }
 
   Future<void> _del(String id) async {
     await Store.i.delete(id);
+    if (!mounted) return;
     _r();
   }
 
@@ -70,9 +74,11 @@ class _InvoicesPageState extends State<InvoicesPage> {
         list.sort((a, b) => amount(b).compareTo(amount(a)));
         break;
       case _InvoiceSort.client:
-        list.sort((a, b) => a.clientDisplay
-            .toLowerCase()
-            .compareTo(b.clientDisplay.toLowerCase()));
+        list.sort(
+          (a, b) => a.clientDisplay.toLowerCase().compareTo(
+                b.clientDisplay.toLowerCase(),
+              ),
+        );
         break;
     }
     return list;
@@ -88,7 +94,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
           'Newest first',
           'Due soon',
           'Highest amount',
-          'Client A-Z'
+          'Client A-Z',
         ],
         sel: _sort.index,
         dark: T.dark(context),
@@ -100,20 +106,28 @@ class _InvoicesPageState extends State<InvoicesPage> {
   void _open(Invoice inv) => Navigator.push(
         context,
         slideRoute(DetailPage(invoice: inv, onRefresh: _r)),
-      ).then((_) => _r());
+      ).then((_) {
+        if (mounted) _r();
+      });
 
   void _newInvoice() {
     Store.i.create().then((inv) {
       if (!mounted) return;
       Navigator.push(
-          context,
-          slideRoute(CreatePage(
+        context,
+        slideRoute(
+          CreatePage(
             invoice: inv,
             onSaved: (v) async {
               await Store.i.add(v);
+              if (!mounted) return;
               _r();
             },
-          ))).then((_) => _r());
+          ),
+        ),
+      ).then((_) {
+        if (mounted) _r();
+      });
     });
   }
 
@@ -122,135 +136,136 @@ class _InvoicesPageState extends State<InvoicesPage> {
     return Scaffold(
       backgroundColor: T.bg(context),
       body: SafeArea(
-        child: Column(children: [
-          // ── Top bar ──
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 16, 0),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              child: _searching ? _searchBar() : _topRow(),
+        child: Column(
+          children: [
+            // ── Top bar ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 16, 0),
+              child: AnimatedSwitcher(
+                duration: Prefs.reduceMotion
+                    ? Duration.zero
+                    : const Duration(milliseconds: 200),
+                child: _searching ? _searchBar() : _topRow(),
+              ),
             ),
-          ),
 
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-          // ── Tabs ──
-          if (!_searching) _tabs(),
+            // ── Tabs ──
+            if (!_searching) _tabs(),
 
-          const SizedBox(height: 12),
+            const SizedBox(height: 12),
 
-          // ── List ──
-          Expanded(
-            child: _searching
-                ? _buildList(Store.i.search(_q), 'No results', false)
-                : _currentList(),
-          ),
-        ]),
+            // ── List ──
+            Expanded(
+              child: _searching
+                  ? _buildList(Store.i.search(_q), 'No results', false)
+                  : _currentList(),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   // ── Top row ──────────────────────────────────────────────────
 
-  Widget _topRow() => Row(key: const ValueKey('title'), children: [
-        Text('Invoices',
+  Widget _topRow() => Row(
+        key: const ValueKey('title'),
+        children: [
+          Text(
+            'Invoices',
             style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w700,
-                color: T.text(context),
-                letterSpacing: 0)),
-        const Spacer(),
-        _iconBtn(Icons.sort_rounded, _openSort,
-            tooltip: 'Sort invoices', active: _sort != _InvoiceSort.newest),
-        const SizedBox(width: 8),
-        _iconBtn(Icons.search_rounded, () => setState(() => _searching = true),
-            tooltip: 'Search invoices'),
-      ]);
-
-  Widget _searchBar() => Row(key: const ValueKey('search'), children: [
-        Expanded(
-            child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: kSmooth,
-          height: 48,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: _searchFocus.hasFocus ? T.card(context) : T.subtle(context),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: _searchFocus.hasFocus
-                  ? T.text(context).withValues(alpha: 0.18)
-                  : T.border(context),
-              width: 0.8,
+              fontSize: 26,
+              fontWeight: FontWeight.w700,
+              color: T.text(context),
+              letterSpacing: 0,
             ),
           ),
-          child: Row(children: [
-            const SizedBox(width: 14),
-            Icon(Icons.search_rounded,
-                size: 18,
-                color:
-                    _searchFocus.hasFocus ? T.text(context) : T.muted(context)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: TextField(
-                focusNode: _searchFocus,
-                controller: _sc,
-                autofocus: true,
-                style: TextStyle(color: T.text(context), fontSize: 14),
-                decoration: InputDecoration(
-                  isCollapsed: true,
-                  filled: false,
-                  hintText: 'Search invoices…',
-                  hintStyle: TextStyle(color: T.faint(context), fontSize: 14),
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  disabledBorder: InputBorder.none,
-                ),
-                onChanged: (v) => setState(() => _q = v),
+          const Spacer(),
+          _iconBtn(
+            Icons.sort_rounded,
+            _openSort,
+            tooltip: 'Sort invoices',
+            active: _sort != _InvoiceSort.newest,
+          ),
+          const SizedBox(width: 8),
+          _iconBtn(
+            Icons.search_rounded,
+            () => setState(() => _searching = true),
+            tooltip: 'Search invoices',
+          ),
+        ],
+      );
+
+  Widget _searchBar() => Row(
+        key: const ValueKey('search'),
+        children: [
+          Expanded(
+            child: AppSearchField(
+              controller: _sc,
+              focusNode: _searchFocus,
+              hint: 'Search invoices...',
+              autofocus: true,
+              onChanged: (v) => setState(() => _q = v),
+              onClear: () => setState(() {
+                _q = '';
+                _sc.clear();
+              }),
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() {
+              _searching = false;
+              _q = '';
+              _sc.clear();
+            }),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: T.text(context),
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(width: 14),
-          ]),
-        )),
-        TextButton(
-          onPressed: () => setState(() {
-            _searching = false;
-            _q = '';
-            _sc.clear();
-          }),
-          child: Text('Cancel',
-              style: TextStyle(
-                  color: T.text(context),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700)),
-        ),
-      ]);
+          ),
+        ],
+      );
 
-  Widget _iconBtn(IconData icon, VoidCallback onTap,
-          {required String tooltip, bool active = false}) =>
+  Widget _iconBtn(
+    IconData icon,
+    VoidCallback onTap, {
+    required String tooltip,
+    bool active = false,
+  }) =>
       Tooltip(
         message: tooltip,
         child: Semantics(
           button: true,
           label: tooltip,
-          child: GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              onTap();
-            },
+          child: SpringTap(
+            onTap: onTap,
+            scale: 0.92,
+            hoverScale: 1.04,
             child: Container(
-              width: 36,
-              height: 36,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
-                  color: active ? T.inverse(context) : T.card(context),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                      color: active ? Colors.transparent : T.border(context),
-                      width: 0.5)),
-              child: Icon(icon,
-                  size: 17,
-                  color: active ? T.onInverse(context) : T.muted(context)),
+                color: active ? T.accentSoft(context) : T.card(context),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: active
+                      ? T.accent(context).withValues(alpha: 0.22)
+                      : T.border(context).withValues(alpha: 0.70),
+                  width: 0.5,
+                ),
+                boxShadow: active ? T.glow(context) : const [],
+              ),
+              child: Icon(
+                icon,
+                size: 17,
+                color: active ? T.accent(context) : T.muted(context),
+              ),
             ),
           ),
         ),
@@ -261,64 +276,87 @@ class _InvoicesPageState extends State<InvoicesPage> {
   Widget _tabs() => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Container(
-          height: 38,
-          padding: const EdgeInsets.all(3),
+          height: 48,
+          padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
-              color: T.subtle(context),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: T.border(context), width: 0.5)),
+            color: T
+                .card(context)
+                .withValues(alpha: T.dark(context) ? 0.72 : 0.90),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: T.border(context).withValues(alpha: 0.68),
+              width: 0.5,
+            ),
+            boxShadow: T.dark(context) ? const [] : T.softShadow(context),
+          ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(18),
             child: LayoutBuilder(
               builder: (context, constraints) {
                 const labels = ['All', 'Unpaid', 'Overdue', 'Paid'];
                 final itemW = constraints.maxWidth / labels.length;
-                return Stack(children: [
-                  AnimatedPositioned(
-                    duration: const Duration(milliseconds: 220),
-                    curve: kSmooth,
-                    left: itemW * _tab,
-                    top: 0,
-                    bottom: 0,
-                    width: itemW,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: T.inverse(context),
-                        borderRadius: BorderRadius.circular(8),
+                return Stack(
+                  children: [
+                    AnimatedPositioned(
+                      duration: Prefs.reduceMotion
+                          ? Duration.zero
+                          : const Duration(milliseconds: 220),
+                      curve: kSmooth,
+                      left: itemW * _tab,
+                      top: 0,
+                      bottom: 0,
+                      width: itemW,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: T.inverse(context),
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: T.buttonShadow(context),
+                        ),
                       ),
                     ),
-                  ),
-                  Row(
-                    children: List.generate(labels.length, (i) {
-                      final active = i == _tab;
-                      return Expanded(
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            if (active) return;
-                            HapticFeedback.selectionClick();
-                            setState(() => _tab = i);
-                          },
-                          child: Center(
-                            child: AnimatedDefaultTextStyle(
-                              duration: const Duration(milliseconds: 180),
-                              curve: kSmooth,
-                              style: TextStyle(
-                                color: active
-                                    ? T.onInverse(context)
-                                    : T.muted(context),
-                                fontWeight:
-                                    active ? FontWeight.w700 : FontWeight.w500,
-                                fontSize: 11,
+                    Row(
+                      children: List.generate(labels.length, (i) {
+                        final active = i == _tab;
+                        return Expanded(
+                          child: SpringTap(
+                            scale: 0.955,
+                            haptic: false,
+                            onTap: () {
+                              if (active) {
+                                if (Prefs.haptics) {
+                                  HapticFeedback.selectionClick();
+                                }
+                                return;
+                              }
+                              if (Prefs.haptics) {
+                                HapticFeedback.selectionClick();
+                              }
+                              setState(() => _tab = i);
+                            },
+                            child: Center(
+                              child: AnimatedDefaultTextStyle(
+                                duration: Prefs.reduceMotion
+                                    ? Duration.zero
+                                    : const Duration(milliseconds: 180),
+                                curve: kSmooth,
+                                style: TextStyle(
+                                  color: active
+                                      ? T.onInverse(context)
+                                      : T.muted(context),
+                                  fontWeight: active
+                                      ? FontWeight.w800
+                                      : FontWeight.w700,
+                                  fontSize: 12,
+                                ),
+                                child: Text(labels[i]),
                               ),
-                              child: Text(labels[i]),
                             ),
                           ),
-                        ),
-                      );
-                    }),
-                  ),
-                ]);
+                        );
+                      }),
+                    ),
+                  ],
+                );
               },
             ),
           ),
@@ -328,11 +366,19 @@ class _InvoicesPageState extends State<InvoicesPage> {
   Widget _currentList() {
     switch (_tab) {
       case 1:
-        return _buildList(Store.i.unpaid, 'No unpaid invoices', true,
-            subtitle: 'All your invoices are paid.');
+        return _buildList(
+          Store.i.unpaid,
+          'No unpaid invoices',
+          true,
+          subtitle: 'All your invoices are paid.',
+        );
       case 2:
-        return _buildList(Store.i.overdue, 'No overdue invoices', true,
-            subtitle: 'Great! You\'re all caught up.');
+        return _buildList(
+          Store.i.overdue,
+          'No overdue invoices',
+          true,
+          subtitle: 'Great! You\'re all caught up.',
+        );
       case 3:
         return _buildList(Store.i.paid, 'No paid invoices', false);
       default:
@@ -342,8 +388,12 @@ class _InvoicesPageState extends State<InvoicesPage> {
 
   // ── List builder ─────────────────────────────────────────────
 
-  Widget _buildList(List<Invoice> invs, String emptyTitle, bool showCta,
-      {String? subtitle}) {
+  Widget _buildList(
+    List<Invoice> invs,
+    String emptyTitle,
+    bool showCta, {
+    String? subtitle,
+  }) {
     if (invs.isEmpty) {
       return _emptyState(emptyTitle, subtitle, showCta);
     }
@@ -352,7 +402,11 @@ class _InvoicesPageState extends State<InvoicesPage> {
       padding: const EdgeInsets.fromLTRB(0, 4, 0, 100),
       itemCount: sorted.length,
       separatorBuilder: (_, __) => Divider(
-          height: 1, color: T.divider(context), indent: 20, endIndent: 20),
+        height: 1,
+        color: T.divider(context),
+        indent: 20,
+        endIndent: 20,
+      ),
       itemBuilder: (_, i) {
         final inv = sorted[i];
         return _InvRow(
@@ -380,11 +434,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
 class _InvRow extends StatelessWidget {
   final Invoice inv;
   final VoidCallback onTap, onDel;
-  const _InvRow({
-    required this.inv,
-    required this.onTap,
-    required this.onDel,
-  });
+  const _InvRow({required this.inv, required this.onTap, required this.onDel});
 
   String get _title {
     final name = inv.client.name.trim();
@@ -428,29 +478,40 @@ class _InvRow extends StatelessWidget {
           alignment: Alignment.centerRight,
           padding: const EdgeInsets.only(right: 24),
           color: C.overdue,
-          child: const Icon(Icons.delete_outline_rounded,
-              color: C.white, size: 22),
+          child: const Icon(
+            Icons.delete_outline_rounded,
+            color: C.white,
+            size: 22,
+          ),
         ),
       ),
       confirmDismiss: (_) => showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: T.card(context),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Delete Invoice',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-          content: Text('Remove ${inv.num}?',
-              style: TextStyle(color: T.muted(context))),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            'Delete Invoice',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+          ),
+          content: Text(
+            'Remove ${inv.num}?',
+            style: TextStyle(color: T.muted(context)),
+          ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel', style: TextStyle(color: C.grey5))),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel', style: TextStyle(color: C.grey5)),
+            ),
             TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Delete',
-                    style: TextStyle(
-                        color: C.overdue, fontWeight: FontWeight.w600))),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                'Delete',
+                style: TextStyle(color: C.overdue, fontWeight: FontWeight.w600),
+              ),
+            ),
           ],
         ),
       ),
@@ -461,57 +522,69 @@ class _InvRow extends StatelessWidget {
           button: true,
           label: 'Open invoice ${inv.num}',
           hint: 'Swipe left to delete',
-          child: InkWell(
+          child: SpringTap(
+            scale: 0.99,
             onTap: () {
-              HapticFeedback.selectionClick();
+              if (Prefs.haptics) HapticFeedback.selectionClick();
               onTap();
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 17),
-              child: Row(children: [
-                // Left: client + quiet invoice metadata
-                Expanded(
+              child: Row(
+                children: [
+                  // Left: client + quiet invoice metadata
+                  Expanded(
                     child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
-                            color: T.text(context))),
-                    const SizedBox(height: 6),
-                    Text(
-                      meta,
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: urgent ? C.overdue : T.muted(context)),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                            color: T.text(context),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          meta,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: urgent ? C.overdue : T.muted(context),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ),
-                  ],
-                )),
-                const SizedBox(width: 16),
-                // Right: amount + status
-                SizedBox(
-                  width: 96,
-                  child: Column(
+                  ),
+                  const SizedBox(width: 16),
+                  // Right: amount + status
+                  SizedBox(
+                    width: 96,
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(_amount,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                color: T.text(context))),
+                        Text(
+                          _amount,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: T.text(context),
+                          ),
+                        ),
                         const SizedBox(height: 5),
                         StatusPill(inv: inv),
-                      ]),
-                ),
-              ]),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

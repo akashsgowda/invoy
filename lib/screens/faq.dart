@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -86,9 +87,14 @@ class _FaqPageState extends State<FaqPage> {
           icon: Icon(Icons.arrow_back_rounded, size: 18, color: textPrimary),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('FAQ',
-            style: TextStyle(
-                fontSize: 17, fontWeight: FontWeight.w700, color: textPrimary)),
+        title: Text(
+          'FAQ',
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: textPrimary,
+          ),
+        ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(0.5),
           child: Divider(height: 0.5, color: border),
@@ -99,24 +105,30 @@ class _FaqPageState extends State<FaqPage> {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text('Quick answers to common questions.',
-                style:
-                    TextStyle(fontSize: 13, color: textSecondary, height: 1.5)),
+            child: Text(
+              'Quick answers to common questions.',
+              style: TextStyle(fontSize: 13, color: textSecondary, height: 1.5),
+            ),
           ),
           const SizedBox(height: 20),
           for (var si = 0; si < _kSections.length; si++) ...[
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(children: [
-                Icon(_kSections[si].icon, size: 14, color: textSecondary),
-                const SizedBox(width: 6),
-                Text(_kSections[si].title.toUpperCase(),
+              child: Row(
+                children: [
+                  Icon(_kSections[si].icon, size: 14, color: textSecondary),
+                  const SizedBox(width: 6),
+                  Text(
+                    _kSections[si].title.toUpperCase(),
                     style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: textSecondary,
-                        letterSpacing: 0.8)),
-              ]),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: textSecondary,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 8),
             Container(
@@ -128,32 +140,37 @@ class _FaqPageState extends State<FaqPage> {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(14),
-                child: Column(children: [
-                  for (var ii = 0; ii < _kSections[si].items.length; ii++) ...[
-                    if (ii > 0) Divider(height: 0.5, color: border),
-                    _FaqTile(
-                      item: _kSections[si].items[ii],
-                      isOpen: _openKey == '$si-$ii',
-                      dark: dark,
-                      textPrimary: textPrimary,
-                      textSecondary: textSecondary,
-                      onTap: () => setState(() {
-                        final key = '$si-$ii';
-                        _openKey = _openKey == key ? null : key;
-                      }),
-                    ),
+                child: Column(
+                  children: [
+                    for (var ii = 0;
+                        ii < _kSections[si].items.length;
+                        ii++) ...[
+                      if (ii > 0) Divider(height: 0.5, color: border),
+                      _FaqTile(
+                        item: _kSections[si].items[ii],
+                        isOpen: _openKey == '$si-$ii',
+                        dark: dark,
+                        textPrimary: textPrimary,
+                        textSecondary: textSecondary,
+                        onTap: () => setState(() {
+                          final key = '$si-$ii';
+                          _openKey = _openKey == key ? null : key;
+                        }),
+                      ),
+                    ],
                   ],
-                ]),
+                ),
               ),
             ),
             const SizedBox(height: 24),
           ],
           _SupportCard(
-              dark: dark,
-              surf: surf,
-              border: border,
-              textPrimary: textPrimary,
-              textSecondary: textSecondary),
+            dark: dark,
+            surf: surf,
+            border: border,
+            textPrimary: textPrimary,
+            textSecondary: textSecondary,
+          ),
           const SizedBox(height: 8),
         ],
       ),
@@ -166,18 +183,19 @@ class _FaqTile extends StatelessWidget {
   final bool isOpen, dark;
   final Color textPrimary, textSecondary;
   final VoidCallback onTap;
-  const _FaqTile(
-      {required this.item,
-      required this.isOpen,
-      required this.dark,
-      required this.textPrimary,
-      required this.textSecondary,
-      required this.onTap});
+  const _FaqTile({
+    required this.item,
+    required this.isOpen,
+    required this.dark,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) => GestureDetector(
         onTap: () {
-          HapticFeedback.selectionClick();
+          if (Prefs.haptics) HapticFeedback.selectionClick();
           onTap();
         },
         behavior: HitTestBehavior.opaque,
@@ -187,32 +205,48 @@ class _FaqTile extends StatelessWidget {
           alignment: Alignment.topCenter,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Expanded(
-                    child: Text(item.q,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.q,
                         style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: textPrimary,
-                            height: 1.4))),
-                const SizedBox(width: 12),
-                AnimatedRotation(
-                  turns: isOpen ? 0.25 : 0,
-                  duration: const Duration(milliseconds: 260),
-                  curve: kSmooth,
-                  child: Icon(Icons.chevron_right_rounded,
-                      size: 18, color: textSecondary),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: textPrimary,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    AnimatedRotation(
+                      turns: isOpen ? 0.25 : 0,
+                      duration: const Duration(milliseconds: 260),
+                      curve: kSmooth,
+                      child: Icon(
+                        Icons.chevron_right_rounded,
+                        size: 18,
+                        color: textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
-              ]),
-              if (isOpen) ...[
-                const SizedBox(height: 10),
-                Text(item.a,
+                if (isOpen) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    item.a,
                     style: TextStyle(
-                        fontSize: 13, color: textSecondary, height: 1.6)),
+                      fontSize: 13,
+                      color: textSecondary,
+                      height: 1.6,
+                    ),
+                  ),
+                ],
               ],
-            ]),
+            ),
           ),
         ),
       );
@@ -221,73 +255,93 @@ class _FaqTile extends StatelessWidget {
 class _SupportCard extends StatelessWidget {
   final bool dark;
   final Color surf, border, textPrimary, textSecondary;
-  const _SupportCard(
-      {required this.dark,
-      required this.surf,
-      required this.border,
-      required this.textPrimary,
-      required this.textSecondary});
+  const _SupportCard({
+    required this.dark,
+    required this.surf,
+    required this.border,
+    required this.textPrimary,
+    required this.textSecondary,
+  });
 
   @override
   Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.symmetric(horizontal: 16),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-            color: surf,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: border, width: 0.5)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                  color:
-                      dark ? const Color(0xFF1C1C1C) : const Color(0xFFF0F0F0),
-                  borderRadius: BorderRadius.circular(10)),
-              child:
-                  Icon(Icons.bug_report_outlined, size: 18, color: textPrimary),
-            ),
-            const SizedBox(width: 12),
-            Text('Still need help?',
-                style: TextStyle(
+          color: surf,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: border, width: 0.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: dark
+                        ? const Color(0xFF1C1C1C)
+                        : const Color(0xFFF0F0F0),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.bug_report_outlined,
+                    size: 18,
+                    color: textPrimary,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Still need help?',
+                  style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
-                    color: textPrimary)),
-          ]),
-          const SizedBox(height: 10),
-          Text(
+                    color: textPrimary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
               'Open an issue in the project repository with the steps to reproduce.',
-              style:
-                  TextStyle(fontSize: 13, color: textSecondary, height: 1.5)),
-          const SizedBox(height: 14),
-          GestureDetector(
-            onTap: () {
-              HapticFeedback.mediumImpact();
-              Clipboard.setData(
-                  const ClipboardData(text: 'Invoy issue tracker'));
-              showAppSnack(context, 'Issue tracker copied');
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-              decoration: BoxDecoration(
+              style: TextStyle(fontSize: 13, color: textSecondary, height: 1.5),
+            ),
+            const SizedBox(height: 14),
+            GestureDetector(
+              onTap: () {
+                if (Prefs.haptics) HapticFeedback.mediumImpact();
+                Clipboard.setData(
+                    const ClipboardData(text: 'Invoy issue tracker'));
+                showAppSnack(context, 'Issue tracker copied');
+              },
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                decoration: BoxDecoration(
                   color:
                       dark ? const Color(0xFF1C1C1C) : const Color(0xFFF5F5F5),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: border, width: 0.5)),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Invoy issue tracker',
+                  border: Border.all(color: border, width: 0.5),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Invoy issue tracker',
                       style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: textPrimary)),
-                  Icon(Icons.copy_rounded, size: 15, color: textSecondary),
-                ],
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: textPrimary,
+                      ),
+                    ),
+                    Icon(Icons.copy_rounded, size: 15, color: textSecondary),
+                  ],
+                ),
               ),
             ),
-          ),
-        ]),
+          ],
+        ),
       );
 }

@@ -20,7 +20,9 @@ class _ClientsPageState extends State<ClientsPage> {
   @override
   void initState() {
     super.initState();
-    _searchFocus.addListener(() => setState(() {}));
+    _searchFocus.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -41,6 +43,7 @@ class _ClientsPageState extends State<ClientsPage> {
         phone: c.phone,
         address: c.address,
         gstin: c.gstin,
+        state: c.state,
       );
     }
 
@@ -48,14 +51,16 @@ class _ClientsPageState extends State<ClientsPage> {
       if (inv.client.name.isEmpty) continue;
       final k = inv.client.name.trim().toLowerCase();
       final s = map.putIfAbsent(
-          k,
-          () => _ClientSummary(
-                name: inv.client.name,
-                email: inv.client.email,
-                phone: inv.client.phone,
-                address: inv.client.address,
-                gstin: inv.client.gstin,
-              ));
+        k,
+        () => _ClientSummary(
+          name: inv.client.name,
+          email: inv.client.email,
+          phone: inv.client.phone,
+          address: inv.client.address,
+          gstin: inv.client.gstin,
+          state: inv.client.state,
+        ),
+      );
       s.total++;
       if (inv.displayStatus == Status.paid) {
         s.paidCount++;
@@ -67,23 +72,31 @@ class _ClientsPageState extends State<ClientsPage> {
     if (_q.isEmpty) return list;
     final q = _q.toLowerCase();
     return list
-        .where((c) =>
-            c.name.toLowerCase().contains(q) ||
-            c.email.toLowerCase().contains(q))
+        .where(
+          (c) =>
+              c.name.toLowerCase().contains(q) ||
+              c.email.toLowerCase().contains(q),
+        )
         .toList();
   }
 
   void _openDetail(_ClientSummary c) {
     Navigator.push(
-        context,
-        slideRoute(ClientDetailPage(
+      context,
+      slideRoute(
+        ClientDetailPage(
           name: c.name,
           email: c.email,
           phone: c.phone,
           address: c.address,
           gstin: c.gstin,
-          onRefresh: () => setState(() {}),
-        )));
+          state: c.state,
+          onRefresh: () {
+            if (mounted) setState(() {});
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -93,114 +106,79 @@ class _ClientsPageState extends State<ClientsPage> {
     return Scaffold(
       backgroundColor: T.bg(context),
       body: SafeArea(
-        child: Column(children: [
-          // ── Top bar ──
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-            child: Row(children: [
-              Text('Clients',
-                  style: TextStyle(
+        child: Column(
+          children: [
+            // ── Top bar ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              child: Row(
+                children: [
+                  Text(
+                    'Clients',
+                    style: TextStyle(
                       fontSize: 26,
                       fontWeight: FontWeight.w700,
                       color: T.text(context),
-                      letterSpacing: 0)),
-            ]),
-          ),
-
-          const SizedBox(height: 14),
-
-          // ── Search ──
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: kSmooth,
-              height: 48,
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                color:
-                    _searchFocus.hasFocus ? T.card(context) : T.subtle(context),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: _searchFocus.hasFocus
-                      ? T.text(context).withValues(alpha: 0.18)
-                      : T.border(context),
-                  width: 0.8,
-                ),
-              ),
-              child: Row(children: [
-                const SizedBox(width: 14),
-                Icon(Icons.search_rounded,
-                    size: 18,
-                    color: _searchFocus.hasFocus
-                        ? T.text(context)
-                        : T.muted(context)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    focusNode: _searchFocus,
-                    controller: _searchC,
-                    onChanged: (v) => setState(() => _q = v),
-                    style: TextStyle(color: T.text(context), fontSize: 14),
-                    decoration: InputDecoration(
-                      isCollapsed: true,
-                      filled: false,
-                      hintText: 'Search clients…',
-                      hintStyle:
-                          TextStyle(color: T.faint(context), fontSize: 14),
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      disabledBorder: InputBorder.none,
+                      letterSpacing: 0,
                     ),
                   ),
-                ),
-                if (_q.isNotEmpty)
-                  IconButton(
-                    tooltip: 'Clear search',
-                    icon: const Icon(Icons.close_rounded,
-                        size: 15, color: C.grey5),
-                    onPressed: () {
-                      _searchC.clear();
-                      setState(() => _q = '');
-                    },
-                  )
-                else
-                  const SizedBox(width: 14),
-              ]),
+                ],
+              ),
             ),
-          ),
 
-          const SizedBox(height: 12),
+            const SizedBox(height: 14),
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(children: [
-              Text(
-                '${list.length} client${list.length == 1 ? '' : 's'}',
-                style: TextStyle(fontSize: 13, color: T.muted(context)),
+            // ── Search ──
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: AppSearchField(
+                controller: _searchC,
+                focusNode: _searchFocus,
+                hint: 'Search clients...',
+                onChanged: (v) => setState(() => _q = v),
+                onClear: () {
+                  _searchC.clear();
+                  setState(() => _q = '');
+                },
               ),
-            ]),
-          ),
+            ),
 
-          const SizedBox(height: 12),
+            const SizedBox(height: 12),
 
-          // ── List ──
-          Expanded(
-            child: list.isEmpty
-                ? _emptyState()
-                : ListView.separated(
-                    padding: const EdgeInsets.only(bottom: 100),
-                    itemCount: list.length,
-                    separatorBuilder: (_, __) => Divider(
-                        height: 1, color: T.divider(context), indent: 20),
-                    itemBuilder: (_, i) => _ClientRow(
-                      client: list[i],
-                      onTap: () => _openDetail(list[i]),
-                    ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Text(
+                    '${list.length} client${list.length == 1 ? '' : 's'}',
+                    style: TextStyle(fontSize: 13, color: T.muted(context)),
                   ),
-          ),
-        ]),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ── List ──
+            Expanded(
+              child: list.isEmpty
+                  ? _emptyState()
+                  : ListView.separated(
+                      padding: const EdgeInsets.only(bottom: 100),
+                      itemCount: list.length,
+                      separatorBuilder: (_, __) => Divider(
+                        height: 1,
+                        color: T.divider(context),
+                        indent: 20,
+                      ),
+                      itemBuilder: (_, i) => _ClientRow(
+                        client: list[i],
+                        onTap: () => _openDetail(list[i]),
+                      ),
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -227,56 +205,78 @@ class _ClientRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasOutstanding = client.unpaidAmt > 0;
 
-    return InkWell(
+    return SpringTap(
       onTap: onTap,
+      scale: 0.99,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        child: Row(children: [
-          // Avatar
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: T.subtle(context),
-            child: Text(client.initials,
+        child: Row(
+          children: [
+            // Avatar
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: T.subtle(context),
+              child: Text(
+                client.initials,
                 style: TextStyle(
-                    color: T.text(context),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600)),
-          ),
-          const SizedBox(width: 14),
+                  color: T.text(context),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
 
-          // Name + count
-          Expanded(
+            // Name + count
+            Expanded(
               child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(client.name,
-                  style: TextStyle(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    client.name,
+                    style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: T.text(context))),
-              const SizedBox(height: 3),
-              Text('${client.total} invoice${client.total == 1 ? '' : 's'}',
-                  style: TextStyle(fontSize: 12, color: T.muted(context))),
-            ],
-          )),
-
-          // Outstanding
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(
-              hasOutstanding ? amtK(client.unpaidAmt) : 'No due',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: hasOutstanding ? C.overdue : T.faint(context)),
+                      color: T.text(context),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${client.total} invoice${client.total == 1 ? '' : 's'}',
+                    style: TextStyle(fontSize: 12, color: T.muted(context)),
+                  ),
+                ],
+              ),
             ),
-            if (hasOutstanding)
-              const Text('due',
-                  style: TextStyle(fontSize: 10, color: C.overdue)),
-          ]),
 
-          const SizedBox(width: 10),
-          Icon(Icons.chevron_right_rounded, size: 18, color: T.faint(context)),
-        ]),
+            // Outstanding
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  hasOutstanding ? amtK(client.unpaidAmt) : 'No due',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: hasOutstanding ? T.text(context) : T.muted(context),
+                  ),
+                ),
+                if (hasOutstanding)
+                  Text(
+                    'due',
+                    style: TextStyle(fontSize: 10, color: T.muted(context)),
+                  ),
+              ],
+            ),
+
+            const SizedBox(width: 10),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: T.faint(context),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -285,15 +285,17 @@ class _ClientRow extends StatelessWidget {
 // ── Data model ────────────────────────────────────────────────────
 
 class _ClientSummary {
-  final String name, email, phone, address, gstin;
+  final String name, email, phone, address, gstin, state;
   int total = 0, paidCount = 0;
   double unpaidAmt = 0;
-  _ClientSummary(
-      {required this.name,
-      required this.email,
-      required this.phone,
-      required this.address,
-      required this.gstin});
+  _ClientSummary({
+    required this.name,
+    required this.email,
+    required this.phone,
+    required this.address,
+    required this.gstin,
+    required this.state,
+  });
 
   String get initials {
     final parts = name.trim().split(' ').where((w) => w.isNotEmpty).toList();

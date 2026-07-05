@@ -16,13 +16,21 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   bool _editing = false;
-  late final TextEditingController _nameC, _bizC, _gstC, _upiC, _prefixC;
+  late final TextEditingController _nameC;
+  late final TextEditingController _bizC;
+  late final TextEditingController _bizAddressC;
+  late final TextEditingController _bizStateC;
+  late final TextEditingController _gstC;
+  late final TextEditingController _upiC;
+  late final TextEditingController _prefixC;
 
   @override
   void initState() {
     super.initState();
     _nameC = TextEditingController(text: Prefs.yourName.value);
     _bizC = TextEditingController(text: Prefs.bizName.value);
+    _bizAddressC = TextEditingController(text: Prefs.bizAddress.value);
+    _bizStateC = TextEditingController(text: Prefs.bizState.value);
     _gstC = TextEditingController(text: Prefs.gstNum.value);
     _upiC = TextEditingController(text: Prefs.upiId.value);
     _prefixC = TextEditingController(text: Prefs.invPrefix.value);
@@ -32,6 +40,8 @@ class _ProfilePageState extends State<ProfilePage> {
   void dispose() {
     _nameC.dispose();
     _bizC.dispose();
+    _bizAddressC.dispose();
+    _bizStateC.dispose();
     _gstC.dispose();
     _upiC.dispose();
     _prefixC.dispose();
@@ -39,25 +49,34 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _save() async {
+    if (!isValidGstin(_gstC.text)) {
+      if (Prefs.haptics) HapticFeedback.mediumImpact();
+      showAppSnack(context, 'Enter a valid 15-character GSTIN');
+      return;
+    }
     await Prefs.update('yourName', _nameC.text.trim());
     await Prefs.update('bizName', _bizC.text.trim());
-    await Prefs.update('gstNum', _gstC.text.trim());
+    await Prefs.update('bizAddress', _bizAddressC.text.trim());
+    await Prefs.update('bizState', _bizStateC.text.trim());
+    await Prefs.update('gstNum', cleanGstin(_gstC.text));
     await Prefs.update('upiId', _upiC.text.trim());
     await Prefs.update(
-        'invPrefix',
-        _prefixC.text.trim().isEmpty
-            ? 'INV'
-            : _prefixC.text.trim().toUpperCase());
+      'invPrefix',
+      _prefixC.text.trim().isEmpty ? 'INV' : _prefixC.text.trim().toUpperCase(),
+    );
+    if (!mounted) return;
     setState(() => _editing = false);
   }
 
-  String get _initials {
-    final n = Prefs.yourName.value.trim();
-    if (n.isEmpty) return 'U';
-    final p = n.split(' ').where((w) => w.isNotEmpty).toList();
-    return p.length >= 2
-        ? '${p[0][0]}${p[1][0]}'.toUpperCase()
-        : n[0].toUpperCase();
+  void _cancelEdit() {
+    _nameC.text = Prefs.yourName.value;
+    _bizC.text = Prefs.bizName.value;
+    _bizAddressC.text = Prefs.bizAddress.value;
+    _bizStateC.text = Prefs.bizState.value;
+    _gstC.text = Prefs.gstNum.value;
+    _upiC.text = Prefs.upiId.value;
+    _prefixC.text = Prefs.invPrefix.value;
+    setState(() => _editing = false);
   }
 
   String get _qrStatus {
@@ -120,11 +139,14 @@ class _ProfilePageState extends State<ProfilePage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('UPI QR',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: T.text(context))),
+              Text(
+                'UPI QR',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: T.text(context),
+                ),
+              ),
               const SizedBox(height: 14),
               _qrToggleRow(sheetSetState),
               const SizedBox(height: 14),
@@ -171,63 +193,106 @@ class _ProfilePageState extends State<ProfilePage> {
         leading: IconButton(
           tooltip: 'Back',
           onPressed: () => Navigator.pop(context),
-          icon:
-              Icon(Icons.arrow_back_rounded, size: 18, color: T.text(context)),
-        ),
-        title: Text('Profile',
-            style: TextStyle(
-                color: T.text(context),
-                fontSize: 16,
-                fontWeight: FontWeight.w600)),
-        centerTitle: true,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: _editing
-                ? TextButton(
-                    onPressed: _save,
-                    child: Text('Save',
-                        style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: T.text(context))))
-                : TextButton(
-                    onPressed: () => setState(() => _editing = true),
-                    child: Text('Edit',
-                        style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: T.text(context)))),
+          icon: Icon(
+            Icons.arrow_back_rounded,
+            size: 18,
+            color: T.text(context),
           ),
+        ),
+        title: Text(
+          'Business Profile',
+          style: TextStyle(
+            color: T.text(context),
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      body: ListView(
+        children: [
+          _profileHero(),
+          if (!_editing) ...[
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: AppButton(
+                label: 'Edit business details',
+                onTap: () => setState(() => _editing = true),
+              ),
+            ),
+          ],
+          const SizedBox(height: 28),
+
+          // ── Business ──
+          _sLabel('Business'),
+          _block([
+            _field('Your name', _nameC, Prefs.yourName.value),
+            _field('Business name', _bizC, Prefs.bizName.value),
+            _field(
+              'Business address',
+              _bizAddressC,
+              Prefs.bizAddress.value,
+              hint: 'Not set',
+            ),
+            _field(
+              'Business state',
+              _bizStateC,
+              Prefs.bizState.value,
+              hint: 'Not set',
+            ),
+            _field(
+              'GSTIN',
+              _gstC,
+              Prefs.gstNum.value,
+              hint: 'Not set',
+              inputFormatters: gstinInputFormatters,
+            ),
+            _field('UPI ID', _upiC, Prefs.upiId.value, hint: 'Not set'),
+            _qrAction(),
+            _field(
+              'Invoice prefix',
+              _prefixC,
+              Prefs.invPrefix.value,
+              last: true,
+            ),
+          ]),
+          const SizedBox(height: 28),
+
+          // ── Activity ──
+          _sLabel('Activity'),
+          _activityGrid(),
+
+          const SizedBox(height: 80),
         ],
       ),
-      body: ListView(children: [
-        _profileHero(),
-        const SizedBox(height: 28),
-
-        // ── Business ──
-        _sLabel('Business'),
-        _block([
-          _field('Your name', _nameC, Prefs.yourName.value),
-          _field('Business name', _bizC, Prefs.bizName.value),
-          _field('GSTIN', _gstC, Prefs.gstNum.value, hint: 'Not set'),
-          _field('UPI ID', _upiC, Prefs.upiId.value, hint: 'Not set'),
-          _qrAction(),
-          _field('Invoice prefix', _prefixC, Prefs.invPrefix.value, last: true),
-        ]),
-        const SizedBox(height: 28),
-
-        // ── Activity ──
-        _sLabel('Activity'),
-        _block([
-          _info('Total invoices', '${Store.i.all.length}'),
-          _info('Paid invoices', '${Store.i.paid.length}'),
-          _info('Total revenue', amtUi(Store.i.totalRevenue)),
-          _info('Member since', 'May 2026', last: true),
-        ]),
-
-        const SizedBox(height: 80),
-      ]),
+      bottomNavigationBar: _editing
+          ? SafeArea(
+              child: Container(
+                color: T.bg(context),
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: AppButton(
+                        label: 'Cancel',
+                        onTap: _cancelEdit,
+                        tone: AppButtonTone.secondary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: AppButton(
+                        label: 'Save Changes',
+                        onTap: _save,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
     );
   }
 
@@ -235,134 +300,245 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _sLabel(String t) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-        child: Text(t,
-            style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: T.muted(context),
-                letterSpacing: 0)),
+        child: Text(
+          t,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: T.muted(context),
+            letterSpacing: 0,
+          ),
+        ),
       );
 
   Widget _block(List<Widget> children) => Container(
         margin: const EdgeInsets.symmetric(horizontal: 20),
         decoration: BoxDecoration(
-          color: T.card(context),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: T.border(context), width: 0.5),
+          color:
+              T.card(context).withValues(alpha: T.dark(context) ? 0.72 : 0.92),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: T.border(context).withValues(alpha: 0.68),
+            width: 0.5,
+          ),
+          boxShadow: T.dark(context) ? const [] : T.softShadow(context),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(children: children),
       );
 
   Widget _profileHero() {
-    final name =
-        Prefs.yourName.value.isNotEmpty ? Prefs.yourName.value : 'Your Name';
+    final name = Prefs.yourName.value.isNotEmpty
+        ? Prefs.yourName.value
+        : 'Owner name not set';
     final business = Prefs.bizName.value.isNotEmpty
         ? Prefs.bizName.value
-        : 'Business details';
-    final ready = Prefs.yourName.value.isNotEmpty &&
-        Prefs.bizName.value.isNotEmpty &&
-        Prefs.invPrefix.value.isNotEmpty;
+        : 'Business name not set';
+    final gst = Prefs.gstNum.value.isEmpty ? 'GST not set' : 'GST ready';
+    final upi = _qrStatus == 'Not set' ? 'UPI not set' : 'UPI ready';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: T.card(context),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: T.border(context), width: 0.5),
+          color:
+              T.card(context).withValues(alpha: T.dark(context) ? 0.70 : 0.92),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: T.border(context).withValues(alpha: 0.68),
+            width: 0.5,
+          ),
+          boxShadow: T.dark(context) ? const [] : T.softShadow(context),
         ),
-        child: Row(children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: T.inverse(context),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Center(
-                child: Text(_initials,
-                    style: TextStyle(
-                        color: T.onInverse(context),
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800))),
-          ),
-          const SizedBox(width: 15),
-          Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: T.text(context),
-                      letterSpacing: 0)),
-              const SizedBox(height: 4),
-              Text(business,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13, color: T.muted(context))),
-              const SizedBox(height: 12),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: T.subtle(context),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: T.border(context), width: 0.5),
-                ),
-                child: Text(ready ? 'Ready to invoice' : 'Profile incomplete',
-                    style: TextStyle(
-                        color: T.text(context),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Invoice identity',
+              style: TextStyle(
+                color: T.muted(context),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
               ),
-            ]),
-          ),
-        ]),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              business,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                color: T.text(context),
+                letterSpacing: 0,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: T.muted(context)),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(child: _miniChip('Prefix', Prefs.invPrefix.value)),
+                const SizedBox(width: 10),
+                Expanded(child: _miniChip('GST', gst)),
+                const SizedBox(width: 10),
+                Expanded(child: _miniChip('UPI', upi)),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _qrAction() {
-    return Column(children: [
-      InkWell(
-        onTap: _openUpiQrSheet,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Row(children: [
-            Expanded(
-              flex: 2,
-              child: Text('UPI QR',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 14, color: T.muted(context))),
+  Widget _miniChip(String label, String value) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 10),
+        decoration: BoxDecoration(
+          color: T.subtle(context),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: T.border(context).withValues(alpha: 0.62),
+            width: 0.5,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: T.muted(context),
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(height: 4),
+            Text(
+              value.isEmpty ? '-' : value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: T.text(context),
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _activityGrid() => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Row(
+          children: [
+            Expanded(child: _statCard('Invoices', '${Store.i.all.length}')),
+            const SizedBox(width: 10),
+            Expanded(child: _statCard('Paid', '${Store.i.paid.length}')),
+            const SizedBox(width: 10),
             Expanded(
-              flex: 3,
-              child: Text(_qrStatus,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.end,
-                  style: TextStyle(
+                child: _statCard('Revenue', amtCompact(Store.i.totalRevenue))),
+          ],
+        ),
+      );
+
+  Widget _statCard(String label, String value) => Container(
+        height: 74,
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color:
+              T.card(context).withValues(alpha: T.dark(context) ? 0.70 : 0.92),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: T.border(context).withValues(alpha: 0.68),
+            width: 0.5,
+          ),
+          boxShadow: T.dark(context) ? const [] : T.softShadow(context),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: T.muted(context),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: T.text(context),
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _qrAction() {
+    return Column(
+      children: [
+        SpringTap(
+          onTap: _openUpiQrSheet,
+          scale: 0.985,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    'UPI QR',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 14, color: T.muted(context)),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    _qrStatus,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
+                    style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: _qrStatus == 'Not set'
                           ? T.faint(context)
-                          : T.text(context))),
+                          : T.text(context),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: T.faint(context),
+                ),
+              ],
             ),
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right_rounded,
-                size: 18, color: T.faint(context)),
-          ]),
+          ),
         ),
-      ),
-      Divider(height: 1, indent: 20, color: T.divider(context)),
-    ]);
+        Divider(height: 1, indent: 20, color: T.divider(context)),
+      ],
+    );
   }
 
   Widget _qrToggleRow(StateSetter sheetSetState) => Container(
@@ -372,34 +548,43 @@ class _ProfilePageState extends State<ProfilePage> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: T.border(context), width: 0.5),
         ),
-        child: Row(children: [
-          Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Show on PDF',
-                  style: TextStyle(
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Show on PDF',
+                    style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
-                      color: T.text(context))),
-              const SizedBox(height: 3),
-              Text('Adds payment QR to unpaid invoices',
-                  style: TextStyle(fontSize: 12, color: T.muted(context))),
-            ]),
-          ),
-          Switch.adaptive(
-            value: Prefs.showUpiQr,
-            onChanged: (v) async {
-              await Prefs.setShowUpiQr(v);
-              if (!mounted) return;
-              sheetSetState(() {});
-              setState(() {});
-            },
-            activeThumbColor: T.onInverse(context),
-            activeTrackColor: T.inverse(context),
-            inactiveThumbColor: T.faint(context),
-            inactiveTrackColor: T.border(context),
-          ),
-        ]),
+                      color: T.text(context),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Adds payment QR to unpaid invoices',
+                    style: TextStyle(fontSize: 12, color: T.muted(context)),
+                  ),
+                ],
+              ),
+            ),
+            Switch.adaptive(
+              value: Prefs.showUpiQr,
+              onChanged: (v) async {
+                await Prefs.setShowUpiQr(v);
+                if (!mounted) return;
+                sheetSetState(() {});
+                setState(() {});
+              },
+              activeThumbColor: T.onInverse(context),
+              activeTrackColor: T.inverse(context),
+              inactiveThumbColor: T.faint(context),
+              inactiveTrackColor: T.border(context),
+            ),
+          ],
+        ),
       );
 
   Widget _qrPreview() {
@@ -417,9 +602,10 @@ class _ProfilePageState extends State<ProfilePage> {
               ? 'No QR image or UPI ID set'
               : 'Generated from ${Prefs.upiId.value}',
           style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: T.muted(context)),
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: T.muted(context),
+          ),
         ),
       );
     }
@@ -448,8 +634,10 @@ class _ProfilePageState extends State<ProfilePage> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: T.border(context), width: 0.5),
         ),
-        child: Text('QR image could not be previewed',
-            style: TextStyle(fontSize: 13, color: T.muted(context))),
+        child: Text(
+          'QR image could not be previewed',
+          style: TextStyle(fontSize: 13, color: T.muted(context)),
+        ),
       );
     }
   }
@@ -460,164 +648,181 @@ class _ProfilePageState extends State<ProfilePage> {
     required String subtitle,
     required VoidCallback onTap,
   }) =>
-      InkWell(
+      SpringTap(
         onTap: onTap,
+        scale: 0.975,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Row(children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: T.subtle(context),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: T.border(context), width: 0.5),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: T.subtle(context),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: T.border(context), width: 0.5),
+                ),
+                child: Icon(icon, size: 18, color: T.text(context)),
               ),
-              child: Icon(icon, size: 18, color: T.text(context)),
-            ),
-            const SizedBox(width: 13),
-            Expanded(
-              child: Column(
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: T.text(context))),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: T.text(context),
+                      ),
+                    ),
                     const SizedBox(height: 3),
-                    Text(subtitle,
-                        style:
-                            TextStyle(fontSize: 12, color: T.muted(context))),
-                  ]),
-            ),
-            Icon(Icons.chevron_right_rounded,
-                size: 18, color: T.faint(context)),
-          ]),
+                    Text(
+                      subtitle,
+                      style: TextStyle(fontSize: 12, color: T.muted(context)),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded,
+                  size: 18, color: T.faint(context)),
+            ],
+          ),
         ),
       );
 
-  Widget _field(String label, TextEditingController ctrl, String value,
-      {String? hint, bool last = false}) {
+  Widget _field(
+    String label,
+    TextEditingController ctrl,
+    String value, {
+    String? hint,
+    List<TextInputFormatter>? inputFormatters,
+    bool last = false,
+  }) {
     final empty = value.isEmpty;
-    return Column(children: [
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: _editing
-            ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(label,
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: T.faint(context),
-                        fontWeight: FontWeight.w500)),
-                const SizedBox(height: 10),
-                Container(
-                  decoration: BoxDecoration(
-                    color: T.subtle(context),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: T.border(context), width: 0.5),
-                  ),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: TextField(
-                    controller: ctrl,
-                    style: TextStyle(fontSize: 15, color: T.text(context)),
-                    decoration: InputDecoration(
-                      hintText: hint ?? label,
-                      hintStyle:
-                          TextStyle(color: T.faint(context), fontSize: 15),
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      disabledBorder: InputBorder.none,
-                      isDense: false,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
-                ),
-              ])
-            : Row(children: [
-                Expanded(
-                  flex: 2,
-                  child: Text(label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 14, color: T.muted(context))),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  flex: 3,
-                  child: empty
-                      ? Text(
-                          hint ?? '—',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.end,
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: T.faint(context)),
-                        )
-                      : Tooltip(
-                          message: 'Tap to copy $label',
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(8),
-                            onTap: () => _copyValue(label, value),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 2),
-                              child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        value,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        textAlign: TextAlign.end,
-                                        style: TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            color: T.text(context)),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Icon(Icons.copy_rounded,
-                                        size: 12, color: T.faint(context)),
-                                  ]),
-                            ),
-                          ),
-                        ),
-                ),
-              ]),
-      ),
-      if (!last) Divider(height: 1, indent: 20, color: T.divider(context)),
-    ]);
-  }
-
-  Widget _info(String label, String value, {bool last = false}) =>
-      Column(children: [
+    return Column(
+      children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Row(children: [
-            Expanded(
-              child: Text(label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 14, color: T.muted(context))),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: T.text(context))),
-            ),
-          ]),
+          child: _editing
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: T.faint(context),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: T.card(context),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(
+                          color: T.border(context).withValues(alpha: 0.78),
+                          width: 0.7,
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      child: TextField(
+                        controller: ctrl,
+                        inputFormatters: inputFormatters,
+                        style: TextStyle(fontSize: 15, color: T.text(context)),
+                        decoration: InputDecoration(
+                          hintText: hint ?? label,
+                          hintStyle: TextStyle(
+                            color: T.faint(context),
+                            fontSize: 15,
+                          ),
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          disabledBorder: InputBorder.none,
+                          isDense: false,
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 14, color: T.muted(context)),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      flex: 3,
+                      child: empty
+                          ? Text(
+                              hint ?? '—',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.end,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: T.faint(context),
+                              ),
+                            )
+                          : Tooltip(
+                              message: 'Tap to copy $label',
+                              child: SpringTap(
+                                onTap: () => _copyValue(label, value),
+                                scale: 0.985,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 2,
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          value,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.end,
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: T.text(context),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Icon(
+                                        Icons.copy_rounded,
+                                        size: 12,
+                                        color: T.faint(context),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
         ),
         if (!last) Divider(height: 1, indent: 20, color: T.divider(context)),
-      ]);
+      ],
+    );
+  }
 }

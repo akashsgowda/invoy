@@ -1,25 +1,41 @@
 import 'dart:convert';
+import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'theme.dart';
 
-String uid() => DateTime.now().microsecondsSinceEpoch.toString();
+int _uidSeq = 0;
+
+String uid() {
+  _uidSeq = (_uidSeq + 1) & 0xFFFFF;
+  return '${DateTime.now().microsecondsSinceEpoch}-$_uidSeq';
+}
 
 enum PayMode { upi, bank, cash, cheque }
 
 enum Status { draft, pending, paid, overdue }
 
 class Customer {
-  String name, email, phone, address, gstin;
+  String name, email, phone, address, gstin, state;
   Customer({
     this.name = '',
     this.email = '',
     this.phone = '',
     this.address = '',
     this.gstin = '',
+    this.state = '',
   });
   bool get isEmpty => name.isEmpty;
+
+  Customer copy() => Customer(
+        name: name,
+        email: email,
+        phone: phone,
+        address: address,
+        gstin: gstin,
+        state: state,
+      );
 
   Map<String, dynamic> toMap() => {
         'name': name,
@@ -27,6 +43,7 @@ class Customer {
         'phone': phone,
         'address': address,
         'gstin': gstin,
+        'state': state,
       };
 
   factory Customer.fromMap(Map<String, dynamic> m) => Customer(
@@ -35,25 +52,97 @@ class Customer {
         phone: m['phone'] ?? '',
         address: m['address'] ?? '',
         gstin: m['gstin'] ?? '',
+        state: m['state'] ?? '',
       );
 }
 
 class LineItem {
   final String id;
-  String desc;
+  String desc, hsnSac, unit;
   double qty, rate;
+  double? gstRate;
 
-  LineItem({required this.id, this.desc = '', this.qty = 1, this.rate = 0});
+  LineItem({
+    required this.id,
+    this.desc = '',
+    this.qty = 1,
+    this.rate = 0,
+    this.hsnSac = '',
+    this.unit = 'Nos',
+    this.gstRate,
+  });
   double get total => qty * rate;
 
-  Map<String, dynamic> toMap() =>
-      {'id': id, 'desc': desc, 'qty': qty, 'rate': rate};
+  LineItem copy({String? id}) => LineItem(
+        id: id ?? this.id,
+        desc: desc,
+        qty: qty,
+        rate: rate,
+        hsnSac: hsnSac,
+        unit: unit,
+        gstRate: gstRate,
+      );
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'desc': desc,
+        'qty': qty,
+        'rate': rate,
+        'hsnSac': hsnSac,
+        'unit': unit,
+        'gstRate': gstRate,
+      };
 
   factory LineItem.fromMap(Map<String, dynamic> m) => LineItem(
         id: m['id'] ?? uid(),
         desc: m['desc'] ?? '',
-        qty: m['qty'] != null ? double.parse(m['qty'].toString()) : 1.0,
-        rate: m['rate'] != null ? double.parse(m['rate'].toString()) : 0.0,
+        qty: _safeQuantity(m['qty']),
+        rate: _safeMoney(m['rate']),
+        hsnSac: m['hsnSac']?.toString() ?? '',
+        unit: (m['unit']?.toString().trim().isNotEmpty ?? false)
+            ? m['unit'].toString()
+            : 'Nos',
+        gstRate: m['gstRate'] == null ? null : _safeTaxRate(m['gstRate']),
+      );
+}
+
+class SavedItem {
+  String desc, hsnSac, unit;
+  double rate, gstRate;
+  SavedItem({
+    this.desc = '',
+    this.hsnSac = '',
+    this.unit = 'Nos',
+    this.rate = 0,
+    this.gstRate = 18,
+  });
+
+  LineItem toLineItem() => LineItem(
+        id: uid(),
+        desc: desc,
+        qty: 1,
+        rate: rate,
+        hsnSac: hsnSac,
+        unit: unit,
+        gstRate: gstRate,
+      );
+
+  Map<String, dynamic> toMap() => {
+        'desc': desc,
+        'hsnSac': hsnSac,
+        'unit': unit,
+        'rate': rate,
+        'gstRate': gstRate,
+      };
+
+  factory SavedItem.fromMap(Map<String, dynamic> m) => SavedItem(
+        desc: m['desc']?.toString() ?? '',
+        hsnSac: m['hsnSac']?.toString() ?? '',
+        unit: (m['unit']?.toString().trim().isNotEmpty ?? false)
+            ? m['unit'].toString()
+            : 'Nos',
+        rate: _safeMoney(m['rate']),
+        gstRate: _safeTaxRate(m['gstRate'], fallback: 18.0),
       );
 }
 
@@ -63,6 +152,8 @@ class Payment {
   final PayMode mode;
   Payment({required this.amount, required this.date, required this.mode});
 
+  Payment copy() => Payment(amount: amount, date: date, mode: mode);
+
   Map<String, dynamic> toMap() => {
         'amount': amount,
         'date': date.millisecondsSinceEpoch,
@@ -70,17 +161,20 @@ class Payment {
       };
 
   factory Payment.fromMap(Map<String, dynamic> m) => Payment(
-        amount:
-            m['amount'] != null ? double.parse(m['amount'].toString()) : 0.0,
-        date: DateTime.fromMillisecondsSinceEpoch(m['date'] as int),
-        mode: PayMode.values
-            .firstWhere((e) => e.name == m['mode'], orElse: () => PayMode.upi),
+        amount: _safeMoney(m['amount']),
+        date: DateTime.fromMillisecondsSinceEpoch(
+          int.tryParse(m['date']?.toString() ?? '') ?? 0,
+        ),
+        mode: PayMode.values.firstWhere(
+          (e) => e.name == m['mode'],
+          orElse: () => PayMode.upi,
+        ),
       );
 }
 
 class Invoice {
   final String id;
-  String num, template, notes;
+  String num, template, notes, placeOfSupply;
   Customer client;
   List<LineItem> items;
   List<Payment> payments;
@@ -90,6 +184,7 @@ class Invoice {
   double discountValue;
   bool discountIsPercent;
   bool splitGst;
+  bool reverseCharge;
   Status status;
   final DateTime createdAt;
 
@@ -105,15 +200,37 @@ class Invoice {
     this.discountValue = 0,
     this.discountIsPercent = false,
     this.splitGst = true,
+    this.reverseCharge = false,
     this.status = Status.draft,
     this.template = 'Classic',
     this.notes = '',
+    this.placeOfSupply = '',
     DateTime? createdAt,
   })  : client = client ?? Customer(),
         items = items ?? [],
         payments = payments ?? [],
         date = date ?? DateTime.now(),
         createdAt = createdAt ?? DateTime.now();
+
+  Invoice copy() => Invoice(
+        id: id,
+        num: num,
+        client: client.copy(),
+        items: items.map((i) => i.copy()).toList(),
+        payments: payments.map((p) => p.copy()).toList(),
+        date: date,
+        termDays: termDays,
+        gst: gst,
+        discountValue: discountValue,
+        discountIsPercent: discountIsPercent,
+        splitGst: splitGst,
+        reverseCharge: reverseCharge,
+        status: status,
+        template: template,
+        notes: notes,
+        placeOfSupply: placeOfSupply,
+        createdAt: createdAt,
+      );
 
   double get sub => items.fold(0, (s, i) => s + i.total);
   double get discountAmount {
@@ -127,9 +244,30 @@ class Invoice {
     return amount > 0 ? amount : 0;
   }
 
-  double get tax => taxableSub * (gst / 100);
-  double get cgst => tax / 2;
-  double get sgst => tax / 2;
+  double discountShareFor(LineItem item) {
+    if (sub <= 0 || discountAmount <= 0) return 0;
+    return discountAmount * (item.total / sub);
+  }
+
+  double taxableFor(LineItem item) {
+    final taxable = item.total - discountShareFor(item);
+    return taxable > 0 ? taxable : 0;
+  }
+
+  double taxRateFor(LineItem item) {
+    final defaultRate = _clampTaxRate(gst);
+    if (defaultRate <= 0) return 0;
+    return _clampTaxRate(item.gstRate ?? defaultRate);
+  }
+
+  double taxFor(LineItem item) => taxableFor(item) * (taxRateFor(item) / 100);
+
+  double get tax => items.isEmpty
+      ? taxableSub * (_clampTaxRate(gst) / 100)
+      : items.fold(0, (s, i) => s + taxFor(i));
+  double get cgst => splitGst ? tax / 2 : 0;
+  double get sgst => splitGst ? tax / 2 : 0;
+  double get igst => splitGst ? 0 : tax;
   double get total => taxableSub + tax;
   double get paidAmt => payments.fold(0, (s, p) => s + p.amount);
   bool get hasPayment => paidAmt > 0;
@@ -254,19 +392,31 @@ class Invoice {
           phone: client.phone,
           address: client.address,
           gstin: client.gstin,
+          state: client.state,
         ),
         items: items
-            .map((i) =>
-                LineItem(id: uid(), desc: i.desc, qty: i.qty, rate: i.rate))
+            .map(
+              (i) => LineItem(
+                id: uid(),
+                desc: i.desc,
+                qty: i.qty,
+                rate: i.rate,
+                hsnSac: i.hsnSac,
+                unit: i.unit,
+                gstRate: i.gstRate,
+              ),
+            )
             .toList(),
         termDays: termDays,
         gst: gst,
         discountValue: discountValue,
         discountIsPercent: discountIsPercent,
         splitGst: splitGst,
+        reverseCharge: reverseCharge,
         status: Status.draft,
         template: template,
         notes: notes,
+        placeOfSupply: placeOfSupply,
       );
 
   Map<String, dynamic> toMap() => {
@@ -279,6 +429,7 @@ class Invoice {
         'clientPhone': client.phone,
         'clientAddr': client.address,
         'clientGstin': client.gstin,
+        'clientState': client.state,
         'items': jsonEncode(items.map((i) => i.toMap()).toList()),
         'payments': jsonEncode(payments.map((p) => p.toMap()).toList()),
         'invoiceDate': date.millisecondsSinceEpoch,
@@ -287,6 +438,8 @@ class Invoice {
         'discountValue': discountValue,
         'discountIsPercent': discountIsPercent ? 1 : 0,
         'splitGst': splitGst ? 1 : 0,
+        'reverseCharge': reverseCharge ? 1 : 0,
+        'placeOfSupply': placeOfSupply,
         'status': status.name,
         'createdAt': createdAt.millisecondsSinceEpoch,
       };
@@ -305,6 +458,7 @@ class Invoice {
         phone: m['clientPhone'] as String? ?? '',
         address: m['clientAddr'] as String? ?? '',
         gstin: m['clientGstin'] as String? ?? '',
+        state: m['clientState'] as String? ?? '',
       ),
       items: itemsRaw
           .map((e) => LineItem.fromMap(e as Map<String, dynamic>))
@@ -312,19 +466,74 @@ class Invoice {
       payments: paysRaw
           .map((e) => Payment.fromMap(e as Map<String, dynamic>))
           .toList(),
-      date: DateTime.fromMillisecondsSinceEpoch(m['invoiceDate'] as int),
-      termDays: m['termDays'] as int? ?? 30,
-      gst: m['gst'] != null ? double.parse(m['gst'].toString()) : 18.0,
-      discountValue: m['discountValue'] != null
-          ? double.parse(m['discountValue'].toString())
-          : 0.0,
-      discountIsPercent: (m['discountIsPercent'] as int?) == 1,
-      splitGst: (m['splitGst'] as int?) == 1,
-      status: Status.values
-          .firstWhere((e) => e.name == m['status'], orElse: () => Status.draft),
-      createdAt: DateTime.fromMillisecondsSinceEpoch(m['createdAt'] as int),
+      date: DateTime.fromMillisecondsSinceEpoch(
+        _safeInt(m['invoiceDate'],
+            fallback: DateTime.now().millisecondsSinceEpoch),
+      ),
+      termDays: _safeTermDays(m['termDays']),
+      gst: _safeTaxRate(m['gst'], fallback: 18.0),
+      discountValue: _safeDouble(m['discountValue']),
+      discountIsPercent: _safeBool(m['discountIsPercent']),
+      splitGst: _safeBool(m['splitGst'], fallback: true),
+      reverseCharge: _safeBool(m['reverseCharge']),
+      placeOfSupply: m['placeOfSupply'] as String? ?? '',
+      status: Status.values.firstWhere(
+        (e) => e.name == m['status'],
+        orElse: () => Status.draft,
+      ),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(
+        int.tryParse(m['createdAt']?.toString() ?? '') ??
+            int.tryParse(m['invoiceDate']?.toString() ?? '') ??
+            DateTime.now().millisecondsSinceEpoch,
+      ),
     );
   }
+}
+
+double _safeDouble(Object? value, {double fallback = 0}) {
+  final parsed = double.tryParse(value?.toString().replaceAll(',', '') ?? '');
+  if (parsed == null || !parsed.isFinite) return fallback;
+  return parsed;
+}
+
+double _safeMoney(Object? value, {double fallback = 0}) {
+  final parsed = _safeDouble(value, fallback: fallback);
+  return parsed < 0 ? 0 : parsed;
+}
+
+double _safeQuantity(Object? value, {double fallback = 1}) {
+  final parsed = _safeDouble(value, fallback: fallback);
+  return parsed <= 0 ? fallback : parsed;
+}
+
+double _safeTaxRate(Object? value, {double fallback = 0}) {
+  return _clampTaxRate(_safeDouble(value, fallback: fallback));
+}
+
+double _clampTaxRate(double value) {
+  if (!value.isFinite || value < 0) return 0;
+  if (value > 100) return 100;
+  return value;
+}
+
+int _safeInt(Object? value, {int fallback = 0}) {
+  final parsed = int.tryParse(value?.toString() ?? '');
+  return parsed ?? fallback;
+}
+
+int _safeTermDays(Object? value, {int fallback = 30}) {
+  final parsed = _safeInt(value, fallback: fallback);
+  return parsed.clamp(0, 3650).toInt();
+}
+
+bool _safeBool(Object? value, {bool fallback = false}) {
+  if (value == null) return fallback;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final raw = value.toString().trim().toLowerCase();
+  if (raw == '1' || raw == 'true' || raw == 'yes') return true;
+  if (raw == '0' || raw == 'false' || raw == 'no') return false;
+  return fallback;
 }
 
 class DB {
@@ -335,7 +544,7 @@ class DB {
     final dbPath = await getDatabasesPath();
     instance = await openDatabase(
       p.join(dbPath, 'invoy_v2.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE prefs (key TEXT PRIMARY KEY, val TEXT NOT NULL)
@@ -346,10 +555,12 @@ class DB {
             num TEXT, template TEXT, notes TEXT,
             clientName TEXT, clientEmail TEXT,
             clientPhone TEXT, clientAddr TEXT, clientGstin TEXT,
+            clientState TEXT,
             items TEXT, payments TEXT,
             invoiceDate INTEGER, termDays INTEGER, gst REAL,
             discountValue REAL, discountIsPercent INTEGER,
-            splitGst INTEGER, status TEXT, createdAt INTEGER
+            splitGst INTEGER, reverseCharge INTEGER,
+            placeOfSupply TEXT, status TEXT, createdAt INTEGER
           )
         ''');
         await db.execute('''
@@ -357,6 +568,7 @@ class DB {
         ''');
         await db.insert('counter', {'id': 1, 'val': 0});
         await _createClientsTable(db);
+        await _createSavedItemsTable(db);
       },
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) {
@@ -364,14 +576,45 @@ class DB {
         }
         if (oldVersion < 3) {
           await _addColumnIfMissing(
-              db, 'invoices', 'discountValue', 'REAL DEFAULT 0');
+            db,
+            'invoices',
+            'discountValue',
+            'REAL DEFAULT 0',
+          );
           await _addColumnIfMissing(
-              db, 'invoices', 'discountIsPercent', 'INTEGER DEFAULT 0');
+            db,
+            'invoices',
+            'discountIsPercent',
+            'INTEGER DEFAULT 0',
+          );
+        }
+        if (oldVersion < 4) {
+          await _createClientsTable(db);
+          await _createSavedItemsTable(db);
+          await _addColumnIfMissing(db, 'clients', 'state', 'TEXT DEFAULT ""');
+          await _addColumnIfMissing(
+            db,
+            'invoices',
+            'clientState',
+            'TEXT DEFAULT ""',
+          );
+          await _addColumnIfMissing(
+            db,
+            'invoices',
+            'reverseCharge',
+            'INTEGER DEFAULT 0',
+          );
+          await _addColumnIfMissing(
+            db,
+            'invoices',
+            'placeOfSupply',
+            'TEXT DEFAULT ""',
+          );
         }
       },
     );
     final row = await instance.query('counter', where: 'id = 1');
-    _ctr = row.isNotEmpty ? row.first['val'] as int : 0;
+    _ctr = row.isNotEmpty ? _safeInt(row.first['val']) : 0;
   }
 
   static Future<void> _createClientsTable(Database db) async {
@@ -382,13 +625,31 @@ class DB {
         phone TEXT,
         address TEXT,
         gstin TEXT,
+        state TEXT,
+        createdAt INTEGER
+      )
+    ''');
+  }
+
+  static Future<void> _createSavedItemsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS saved_items (
+        desc TEXT PRIMARY KEY,
+        hsnSac TEXT,
+        unit TEXT,
+        rate REAL,
+        gstRate REAL,
         createdAt INTEGER
       )
     ''');
   }
 
   static Future<void> _addColumnIfMissing(
-      Database db, String table, String column, String definition) async {
+    Database db,
+    String table,
+    String column,
+    String definition,
+  ) async {
     final rows = await db.rawQuery('PRAGMA table_info($table)');
     final exists = rows.any((row) => row['name'] == column);
     if (!exists) {
@@ -405,8 +666,11 @@ class DB {
   }
 
   static Future<void> saveInvoice(Invoice inv) async {
-    await instance.insert('invoices', inv.toMap(),
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    await instance.insert(
+      'invoices',
+      inv.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   static Future<void> deleteInvoice(String id) async {
@@ -417,15 +681,26 @@ class DB {
     await instance.transaction((txn) async {
       await txn.delete('invoices');
       for (final inv in invoices) {
-        await txn.insert('invoices', inv.toMap(),
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.insert(
+          'invoices',
+          inv.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
     });
   }
 
   static Future<List<Invoice>> loadAll() async {
     final rows = await instance.query('invoices', orderBy: 'createdAt DESC');
-    return rows.map(Invoice.fromMap).toList();
+    final invoices = <Invoice>[];
+    for (final row in rows) {
+      try {
+        invoices.add(Invoice.fromMap(row));
+      } catch (_) {
+        // Ignore a corrupt row so local startup never gets stuck on bad data.
+      }
+    }
+    return invoices;
   }
 
   static Future<void> saveClient(Customer c) async {
@@ -437,6 +712,7 @@ class DB {
           'phone': c.phone,
           'address': c.address,
           'gstin': c.gstin,
+          'state': c.state,
           'createdAt': DateTime.now().millisecondsSinceEpoch,
         },
         conflictAlgorithm: ConflictAlgorithm.replace);
@@ -456,20 +732,21 @@ class DB {
           phone: c.phone.trim(),
           address: c.address.trim(),
           gstin: c.gstin.trim(),
+          state: c.state.trim(),
         );
         if (clean.name.isEmpty) continue;
         await txn.insert(
-          'clients',
-          {
-            'name': clean.name,
-            'email': clean.email,
-            'phone': clean.phone,
-            'address': clean.address,
-            'gstin': clean.gstin,
-            'createdAt': DateTime.now().millisecondsSinceEpoch,
-          },
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+            'clients',
+            {
+              'name': clean.name,
+              'email': clean.email,
+              'phone': clean.phone,
+              'address': clean.address,
+              'gstin': clean.gstin,
+              'state': clean.state,
+              'createdAt': DateTime.now().millisecondsSinceEpoch,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace);
       }
     });
   }
@@ -486,23 +763,98 @@ class DB {
       }
     }
     _ctr = maxCounter;
-    await instance.insert('counter', {'id': 1, 'val': _ctr},
+    await instance.insert(
+        'counter',
+        {
+          'id': 1,
+          'val': _ctr,
+        },
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   static Future<List<Customer>> loadClients() async {
-    final rows =
-        await instance.query('clients', orderBy: 'name COLLATE NOCASE');
+    final rows = await instance.query(
+      'clients',
+      orderBy: 'name COLLATE NOCASE',
+    );
     return rows
-        .map((m) => Customer(
-              name: m['name'] as String? ?? '',
-              email: m['email'] as String? ?? '',
-              phone: m['phone'] as String? ?? '',
-              address: m['address'] as String? ?? '',
-              gstin: m['gstin'] as String? ?? '',
-            ))
+        .map(
+          (m) => Customer(
+            name: m['name'] as String? ?? '',
+            email: m['email'] as String? ?? '',
+            phone: m['phone'] as String? ?? '',
+            address: m['address'] as String? ?? '',
+            gstin: m['gstin'] as String? ?? '',
+            state: m['state'] as String? ?? '',
+          ),
+        )
         .where((c) => c.name.trim().isNotEmpty)
         .toList();
+  }
+
+  static Future<List<SavedItem>> loadSavedItems() async {
+    final rows = await instance.query('saved_items', orderBy: 'createdAt DESC');
+    return rows
+        .map(
+          (m) => SavedItem(
+            desc: m['desc'] as String? ?? '',
+            hsnSac: m['hsnSac'] as String? ?? '',
+            unit: m['unit'] as String? ?? 'Nos',
+            rate: _safeDouble(m['rate']),
+            gstRate: _safeDouble(m['gstRate'], fallback: 18),
+          ),
+        )
+        .where((i) => i.desc.trim().isNotEmpty)
+        .toList();
+  }
+
+  static Future<void> saveSavedItem(SavedItem item) async {
+    final clean = SavedItem(
+      desc: item.desc.trim(),
+      hsnSac: item.hsnSac.trim(),
+      unit: item.unit.trim().isEmpty ? 'Nos' : item.unit.trim(),
+      rate: item.rate,
+      gstRate: item.gstRate,
+    );
+    if (clean.desc.isEmpty) return;
+    await instance.insert(
+        'saved_items',
+        {
+          'desc': clean.desc,
+          'hsnSac': clean.hsnSac,
+          'unit': clean.unit,
+          'rate': clean.rate,
+          'gstRate': clean.gstRate,
+          'createdAt': DateTime.now().millisecondsSinceEpoch,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  static Future<void> replaceSavedItems(List<SavedItem> items) async {
+    await instance.transaction((txn) async {
+      await txn.delete('saved_items');
+      for (final item in items) {
+        final clean = SavedItem(
+          desc: item.desc.trim(),
+          hsnSac: item.hsnSac.trim(),
+          unit: item.unit.trim().isEmpty ? 'Nos' : item.unit.trim(),
+          rate: item.rate,
+          gstRate: item.gstRate,
+        );
+        if (clean.desc.isEmpty) continue;
+        await txn.insert(
+            'saved_items',
+            {
+              'desc': clean.desc,
+              'hsnSac': clean.hsnSac,
+              'unit': clean.unit,
+              'rate': clean.rate,
+              'gstRate': clean.gstRate,
+              'createdAt': DateTime.now().millisecondsSinceEpoch,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
   }
 }
 
@@ -511,6 +863,8 @@ class Prefs {
   static final onboarded = ValueNotifier<bool>(false);
   static final yourName = ValueNotifier<String>('');
   static final bizName = ValueNotifier<String>('');
+  static final bizAddress = ValueNotifier<String>('');
+  static final bizState = ValueNotifier<String>('');
   static final gstNum = ValueNotifier<String>('');
   static final upiId = ValueNotifier<String>('');
   static final upiQrImage = ValueNotifier<String>('');
@@ -519,7 +873,11 @@ class Prefs {
   static final defaultTemplate = ValueNotifier<String>('Classic');
   static final lastBackupAt = ValueNotifier<String>('');
   static bool showUpiQr = true;
+  static bool showDashboardRecent = true;
+  static bool haptics = true;
+  static bool reduceMotion = false;
   static bool splitGst = true;
+  static int startTab = 0;
   static int defaultTermDays = 30;
   static double defaultGst = 18.0;
 
@@ -529,6 +887,8 @@ class Prefs {
 
     yourName.value = map['yourName'] ?? '';
     bizName.value = map['bizName'] ?? '';
+    bizAddress.value = map['bizAddress'] ?? '';
+    bizState.value = map['bizState'] ?? '';
     gstNum.value = map['gstNum'] ?? '';
     upiId.value = map['upiId'] ?? '';
     upiQrImage.value = map['upiQrImage'] ?? '';
@@ -537,9 +897,13 @@ class Prefs {
     defaultTemplate.value = map['defaultTemplate'] ?? 'Classic';
     lastBackupAt.value = map['lastBackupAt'] ?? '';
     showUpiQr = (map['showUpiQr'] ?? '1') == '1';
+    showDashboardRecent = (map['showDashboardRecent'] ?? '1') == '1';
+    haptics = (map['haptics'] ?? '1') == '1';
+    reduceMotion = (map['reduceMotion'] ?? '0') == '1';
     splitGst = (map['splitGst'] ?? '1') == '1';
-    defaultTermDays = int.tryParse(map['defaultTermDays'] ?? '30') ?? 30;
-    defaultGst = double.tryParse(map['defaultGst'] ?? '18') ?? 18.0;
+    startTab = (int.tryParse(map['startTab'] ?? '0') ?? 0).clamp(0, 2);
+    defaultTermDays = _safeTermDays(map['defaultTermDays']);
+    defaultGst = _safeTaxRate(map['defaultGst'], fallback: 18.0);
     onboarded.value = (map['onboarded'] ?? '0') == '1';
 
     final tm = map['themeMode'] ?? 'light';
@@ -551,12 +915,21 @@ class Prefs {
   }
 
   static Future<void> _save(String key, String val) async {
-    await DB.instance.insert('prefs', {'key': key, 'val': val},
+    await DB.instance.insert(
+        'prefs',
+        {
+          'key': key,
+          'val': val,
+        },
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   static Future<void> setOnboarded(
-      String name, String biz, String gst, String upi) async {
+    String name,
+    String biz,
+    String gst,
+    String upi,
+  ) async {
     yourName.value = name;
     bizName.value = biz;
     gstNum.value = gst;
@@ -576,6 +949,12 @@ class Prefs {
         break;
       case 'bizName':
         bizName.value = val;
+        break;
+      case 'bizAddress':
+        bizAddress.value = val;
+        break;
+      case 'bizState':
+        bizState.value = val;
         break;
       case 'gstNum':
         gstNum.value = val;
@@ -619,8 +998,11 @@ class Prefs {
       return value == null ? null : double.tryParse(value.toString());
     }
 
-    Future<void> saveText(String key, ValueNotifier<String> notifier,
-        {String? fallback}) async {
+    Future<void> saveText(
+      String key,
+      ValueNotifier<String> notifier, {
+      String? fallback,
+    }) async {
       final value = text(key) ?? fallback;
       if (value == null) return;
       notifier.value = value;
@@ -629,14 +1011,22 @@ class Prefs {
 
     await saveText('yourName', yourName, fallback: yourName.value);
     await saveText('bizName', bizName, fallback: bizName.value);
+    await saveText('bizAddress', bizAddress, fallback: bizAddress.value);
+    await saveText('bizState', bizState, fallback: bizState.value);
     await saveText('gstNum', gstNum, fallback: gstNum.value);
     await saveText('upiId', upiId, fallback: upiId.value);
     await saveText('upiQrImage', upiQrImage, fallback: upiQrImage.value);
-    await saveText('upiQrImageName', upiQrImageName,
-        fallback: upiQrImageName.value);
+    await saveText(
+      'upiQrImageName',
+      upiQrImageName,
+      fallback: upiQrImageName.value,
+    );
     await saveText('invPrefix', invPrefix, fallback: invPrefix.value);
-    await saveText('defaultTemplate', defaultTemplate,
-        fallback: defaultTemplate.value);
+    await saveText(
+      'defaultTemplate',
+      defaultTemplate,
+      fallback: defaultTemplate.value,
+    );
     await saveText('lastBackupAt', lastBackupAt, fallback: lastBackupAt.value);
 
     final split = boolValue('splitGst');
@@ -651,16 +1041,40 @@ class Prefs {
       await _save('showUpiQr', qr ? '1' : '0');
     }
 
+    final recent = boolValue('showDashboardRecent');
+    if (recent != null) {
+      showDashboardRecent = recent;
+      await _save('showDashboardRecent', recent ? '1' : '0');
+    }
+
+    final restoredHaptics = boolValue('haptics');
+    if (restoredHaptics != null) {
+      haptics = restoredHaptics;
+      await _save('haptics', restoredHaptics ? '1' : '0');
+    }
+
+    final motion = boolValue('reduceMotion');
+    if (motion != null) {
+      reduceMotion = motion;
+      await _save('reduceMotion', motion ? '1' : '0');
+    }
+
+    final tab = intValue('startTab');
+    if (tab != null) {
+      startTab = tab.clamp(0, 2);
+      await _save('startTab', '$startTab');
+    }
+
     final terms = intValue('defaultTermDays');
     if (terms != null) {
-      defaultTermDays = terms;
-      await _save('defaultTermDays', '$terms');
+      defaultTermDays = terms.clamp(0, 3650).toInt();
+      await _save('defaultTermDays', '$defaultTermDays');
     }
 
     final gst = doubleValue('defaultGst');
     if (gst != null) {
-      defaultGst = gst;
-      await _save('defaultGst', '$gst');
+      defaultGst = _clampTaxRate(gst);
+      await _save('defaultGst', '$defaultGst');
     }
 
     final onboard = boolValue('onboarded');
@@ -683,12 +1097,13 @@ class Prefs {
   static Future<void> setTheme(ThemeMode m) async {
     themeMode.value = m;
     await _save(
-        'themeMode',
-        m == ThemeMode.dark
-            ? 'dark'
-            : m == ThemeMode.system
-                ? 'system'
-                : 'light');
+      'themeMode',
+      m == ThemeMode.dark
+          ? 'dark'
+          : m == ThemeMode.system
+              ? 'system'
+              : 'light',
+    );
   }
 
   static Future<void> setSplitGst(bool v) async {
@@ -701,6 +1116,26 @@ class Prefs {
     await _save('showUpiQr', v ? '1' : '0');
   }
 
+  static Future<void> setShowDashboardRecent(bool v) async {
+    showDashboardRecent = v;
+    await _save('showDashboardRecent', v ? '1' : '0');
+  }
+
+  static Future<void> setHaptics(bool v) async {
+    haptics = v;
+    await _save('haptics', v ? '1' : '0');
+  }
+
+  static Future<void> setReduceMotion(bool v) async {
+    reduceMotion = v;
+    await _save('reduceMotion', v ? '1' : '0');
+  }
+
+  static Future<void> setStartTab(int v) async {
+    startTab = v.clamp(0, 2);
+    await _save('startTab', '$startTab');
+  }
+
   static Future<void> setUpiQrImage(String data, String name) async {
     upiQrImage.value = data;
     upiQrImageName.value = name;
@@ -709,13 +1144,13 @@ class Prefs {
   }
 
   static Future<void> setDefaultTermDays(int v) async {
-    defaultTermDays = v;
-    await _save('defaultTermDays', '$v');
+    defaultTermDays = v.clamp(0, 3650).toInt();
+    await _save('defaultTermDays', '$defaultTermDays');
   }
 
   static Future<void> setDefaultGst(double v) async {
-    defaultGst = v;
-    await _save('defaultGst', '$v');
+    defaultGst = _clampTaxRate(v);
+    await _save('defaultGst', '$defaultGst');
   }
 
   static Future<void> setDefaultTemplate(String v) async {
@@ -736,31 +1171,75 @@ class Store {
 
   List<Invoice> _list = [];
   List<Customer> _clients = [];
+  List<SavedItem> _savedItems = [];
+  UnmodifiableListView<Invoice> _allView = UnmodifiableListView(const []);
+  UnmodifiableListView<Invoice> _unpaidView = UnmodifiableListView(const []);
+  UnmodifiableListView<Invoice> _paidView = UnmodifiableListView(const []);
+  UnmodifiableListView<Invoice> _overdueView = UnmodifiableListView(const []);
+  UnmodifiableListView<Customer> _clientView = UnmodifiableListView(const []);
+  UnmodifiableListView<SavedItem> _savedItemView = UnmodifiableListView(
+    const [],
+  );
+  double _totalRevenue = 0;
+  double _totalPending = 0;
+  double _totalOverdue = 0;
   bool _loaded = false;
 
   Future<void> load() async {
     if (_loaded) return;
     _list = await DB.loadAll();
     _clients = await DB.loadClients();
+    _savedItems = await DB.loadSavedItems();
+    _rebuildViews();
     _loaded = true;
   }
 
-  List<Invoice> get all => List.unmodifiable(_list);
-  List<Invoice> get unpaid =>
-      _list.where((i) => i.displayStatus != Status.paid).toList();
-  List<Invoice> get paid =>
-      _list.where((i) => i.displayStatus == Status.paid).toList();
-  List<Invoice> get overdue => _list.where((i) => i.isOverdue).toList();
+  void _rebuildViews() {
+    _allView = UnmodifiableListView(_list);
+    final unpaid = <Invoice>[];
+    final paid = <Invoice>[];
+    final overdue = <Invoice>[];
+    var revenue = 0.0;
+    var pending = 0.0;
+    var overdueAmount = 0.0;
 
-  double get totalRevenue => _list.fold(0, (s, i) => s + i.collectedAmt);
-  double get totalPending => unpaid.fold(0, (s, i) => s + i.balance);
-  double get totalOverdue => overdue.fold(0, (s, i) => s + i.balance);
+    for (final inv in _list) {
+      revenue += inv.collectedAmt;
+      if (inv.displayStatus == Status.paid) {
+        paid.add(inv);
+      } else {
+        unpaid.add(inv);
+        pending += inv.balance;
+      }
+      if (inv.isOverdue) {
+        overdue.add(inv);
+        overdueAmount += inv.balance;
+      }
+    }
+
+    _unpaidView = UnmodifiableListView(unpaid);
+    _paidView = UnmodifiableListView(paid);
+    _overdueView = UnmodifiableListView(overdue);
+    _totalRevenue = revenue;
+    _totalPending = pending;
+    _totalOverdue = overdueAmount;
+    _clientView = UnmodifiableListView(_buildClients());
+    _savedItemView = UnmodifiableListView(_savedItems);
+  }
+
+  List<Invoice> get all => _allView;
+  List<Invoice> get unpaid => _unpaidView;
+  List<Invoice> get paid => _paidView;
+  List<Invoice> get overdue => _overdueView;
+
+  double get totalRevenue => _totalRevenue;
+  double get totalPending => _totalPending;
+  double get totalOverdue => _totalOverdue;
 
   Future<Invoice> create() async {
-    final newNum = await DB.nextNum();
     return Invoice(
       id: uid(),
-      num: newNum,
+      num: '',
       gst: Prefs.defaultGst,
       splitGst: Prefs.splitGst,
       termDays: Prefs.defaultTermDays,
@@ -770,30 +1249,47 @@ class Store {
   }
 
   Future<void> add(Invoice inv) async {
+    await _ensureInvoiceNumber(inv);
     final existing = _list.indexWhere((e) => e.id == inv.id);
     if (existing != -1) {
       _list[existing] = inv;
       await DB.saveInvoice(inv);
+      _rebuildViews();
       return;
     }
     _list.insert(0, inv);
     await DB.saveInvoice(inv);
+    _rebuildViews();
   }
 
   Future<void> update(Invoice inv) async {
+    await _ensureInvoiceNumber(inv);
     final x = _list.indexWhere((e) => e.id == inv.id);
-    if (x != -1) _list[x] = inv;
+    if (x != -1) {
+      _list[x] = inv;
+    } else {
+      _list.insert(0, inv);
+    }
     await DB.saveInvoice(inv);
+    _rebuildViews();
+  }
+
+  Future<void> _ensureInvoiceNumber(Invoice inv) async {
+    if (inv.num.trim().isEmpty) {
+      inv.num = await DB.nextNum();
+    }
   }
 
   Future<void> delete(String id) async {
     _list.removeWhere((i) => i.id == id);
     await DB.deleteInvoice(id);
+    _rebuildViews();
   }
 
   Future<void> restoreBackup({
     required List<Invoice> invoices,
     required List<Customer> clients,
+    List<SavedItem> savedItems = const [],
     required Map<String, dynamic> prefs,
   }) async {
     await Prefs.restoreFromMap(prefs);
@@ -808,6 +1304,7 @@ class Store {
         phone: c.phone.trim(),
         address: c.address.trim(),
         gstin: c.gstin.trim(),
+        state: c.state.trim(),
       );
       final key = clean.name.toLowerCase();
       if (key.isEmpty || seenClients.contains(key)) continue;
@@ -817,10 +1314,29 @@ class Store {
 
     await DB.replaceInvoices(sortedInvoices);
     await DB.replaceClients(cleanClients);
+    final cleanSavedItems = <SavedItem>[];
+    final seenItems = <String>{};
+    for (final item in savedItems) {
+      final clean = SavedItem(
+        desc: item.desc.trim(),
+        hsnSac: item.hsnSac.trim(),
+        unit: item.unit.trim().isEmpty ? 'Nos' : item.unit.trim(),
+        rate: item.rate,
+        gstRate: item.gstRate,
+      );
+      final key = clean.desc.toLowerCase();
+      if (key.isEmpty || seenItems.contains(key)) continue;
+      seenItems.add(key);
+      cleanSavedItems.add(clean);
+    }
+
+    await DB.replaceSavedItems(cleanSavedItems);
     await DB.resetCounterFromInvoices(sortedInvoices);
     _list = sortedInvoices;
     _clients = cleanClients
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    _savedItems = cleanSavedItems;
+    _rebuildViews();
     _loaded = true;
   }
 
@@ -831,10 +1347,12 @@ class Store {
     if (_list[x].items.isEmpty || remaining <= 0) return;
     if (remaining > 0) {
       _list[x].payments.add(
-          Payment(amount: remaining, date: DateTime.now(), mode: PayMode.upi));
+            Payment(amount: remaining, date: DateTime.now(), mode: PayMode.upi),
+          );
     }
     _list[x].status = Status.paid;
     await DB.saveInvoice(_list[x]);
+    _rebuildViews();
   }
 
   Future<void> markUnpaid(String id) async {
@@ -843,41 +1361,46 @@ class Store {
     _list[x].payments.clear();
     _list[x].status = Status.pending;
     await DB.saveInvoice(_list[x]);
+    _rebuildViews();
   }
 
   List<Invoice> search(String q) {
     final lq = q.toLowerCase();
     return _list
-        .where((i) =>
-            i.clientDisplay.toLowerCase().contains(lq) ||
-            i.num.toLowerCase().contains(lq))
+        .where(
+          (i) =>
+              i.clientDisplay.toLowerCase().contains(lq) ||
+              i.num.toLowerCase().contains(lq),
+        )
         .toList();
   }
 
   List<String> get clientNames =>
-      clients.map((c) => c.name).where((n) => n.isNotEmpty).toSet().toList()
-        ..sort();
+      _clientView.map((c) => c.name).where((n) => n.isNotEmpty).toList();
 
-  List<Customer> get clients {
+  List<Customer> _buildClients() {
     final map = <String, Customer>{};
 
     void add(Customer c) {
       final key = c.name.trim().toLowerCase();
       if (key.isEmpty) return;
       map.putIfAbsent(
-          key,
-          () => Customer(
-                name: c.name.trim(),
-                email: c.email.trim(),
-                phone: c.phone.trim(),
-                address: c.address.trim(),
-                gstin: c.gstin.trim(),
-              ));
+        key,
+        () => Customer(
+          name: c.name.trim(),
+          email: c.email.trim(),
+          phone: c.phone.trim(),
+          address: c.address.trim(),
+          gstin: c.gstin.trim(),
+          state: c.state.trim(),
+        ),
+      );
       final existing = map[key]!;
       if (existing.email.isEmpty) existing.email = c.email.trim();
       if (existing.phone.isEmpty) existing.phone = c.phone.trim();
       if (existing.address.isEmpty) existing.address = c.address.trim();
       if (existing.gstin.isEmpty) existing.gstin = c.gstin.trim();
+      if (existing.state.isEmpty) existing.state = c.state.trim();
     }
 
     for (final c in _clients) {
@@ -892,6 +1415,10 @@ class Store {
     return list;
   }
 
+  List<Customer> get clients => _clientView;
+
+  List<SavedItem> get savedItems => _savedItemView;
+
   Future<void> saveClient(Customer c) async {
     final clean = Customer(
       name: c.name.trim(),
@@ -899,6 +1426,7 @@ class Store {
       phone: c.phone.trim(),
       address: c.address.trim(),
       gstin: c.gstin.trim(),
+      state: c.state.trim(),
     );
     if (clean.name.isEmpty) return;
 
@@ -910,6 +1438,7 @@ class Store {
       _clients[x] = clean;
     }
     await DB.saveClient(clean);
+    _rebuildViews();
   }
 
   Future<void> updateClient(Customer oldClient, Customer updated) async {
@@ -919,6 +1448,7 @@ class Store {
       phone: updated.phone.trim(),
       address: updated.address.trim(),
       gstin: updated.gstin.trim(),
+      state: updated.state.trim(),
     );
     if (clean.name.isEmpty) return;
 
@@ -946,9 +1476,35 @@ class Store {
           phone: clean.phone,
           address: clean.address,
           gstin: clean.gstin,
+          state: clean.state,
         );
         await DB.saveInvoice(inv);
       }
     }
+    _rebuildViews();
+  }
+
+  Future<void> deleteClient(Customer client) async {
+    final key = client.name.trim().toLowerCase();
+    if (key.isEmpty) return;
+    _clients.removeWhere((e) => e.name.trim().toLowerCase() == key);
+    await DB.deleteClient(client.name.trim());
+    _rebuildViews();
+  }
+
+  Future<void> saveSavedItem(LineItem item) async {
+    final clean = SavedItem(
+      desc: item.desc.trim(),
+      hsnSac: item.hsnSac.trim(),
+      unit: item.unit.trim().isEmpty ? 'Nos' : item.unit.trim(),
+      rate: item.rate,
+      gstRate: item.gstRate ?? Prefs.defaultGst,
+    );
+    if (clean.desc.isEmpty) return;
+    final key = clean.desc.toLowerCase();
+    _savedItems.removeWhere((i) => i.desc.trim().toLowerCase() == key);
+    _savedItems.insert(0, clean);
+    await DB.saveSavedItem(clean);
+    _rebuildViews();
   }
 }

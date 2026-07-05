@@ -13,6 +13,7 @@ class BackupPreview {
     required this.path,
     required this.invoices,
     required this.clients,
+    required this.savedItems,
     required this.prefs,
     this.createdAt,
   });
@@ -20,6 +21,7 @@ class BackupPreview {
   final String path;
   final List<Invoice> invoices;
   final List<Customer> clients;
+  final List<SavedItem> savedItems;
   final Map<String, dynamic> prefs;
   final DateTime? createdAt;
 
@@ -72,26 +74,78 @@ Future<File> createInvoicesCsvFile() async {
       'Subtotal',
       'Discount',
       'GST',
+      'CGST',
+      'SGST',
+      'IGST',
       'Total',
       'Paid',
       'Balance',
     ],
-    ...Store.i.all.map((inv) => [
-          inv.num,
-          fDate(inv.date),
-          inv.clientDisplay,
-          inv.statusLabel,
-          inv.sub.toStringAsFixed(2),
-          inv.discountAmount.toStringAsFixed(2),
-          inv.tax.toStringAsFixed(2),
-          inv.total.toStringAsFixed(2),
-          inv.paidAmt.toStringAsFixed(2),
-          inv.balance.toStringAsFixed(2),
-        ]),
+    ...Store.i.all.map(
+      (inv) => [
+        inv.num,
+        fDate(inv.date),
+        inv.clientDisplay,
+        inv.statusLabel,
+        inv.sub.toStringAsFixed(2),
+        inv.discountAmount.toStringAsFixed(2),
+        inv.tax.toStringAsFixed(2),
+        inv.cgst.toStringAsFixed(2),
+        inv.sgst.toStringAsFixed(2),
+        inv.igst.toStringAsFixed(2),
+        inv.total.toStringAsFixed(2),
+        inv.paidAmt.toStringAsFixed(2),
+        inv.balance.toStringAsFixed(2),
+      ],
+    ),
   ];
   final csv = rows.map((row) => row.map(_safeCell).join(',')).join('\n');
   return _writeExportFile(
-      'invoy_invoices_${DateTime.now().millisecondsSinceEpoch}.csv', csv);
+    'invoy_invoices_${DateTime.now().millisecondsSinceEpoch}.csv',
+    csv,
+  );
+}
+
+Future<File> createGstSummaryCsvFile() async {
+  final rows = <List<Object?>>[
+    [
+      'Invoice No',
+      'Date',
+      'Client',
+      'Client GSTIN',
+      'Place of Supply',
+      'Tax Type',
+      'Taxable Value',
+      'CGST',
+      'SGST',
+      'IGST',
+      'Total GST',
+      'Invoice Total',
+      'Status',
+    ],
+    ...Store.i.all.where((inv) => inv.gst > 0).map(
+          (inv) => [
+            inv.num,
+            fDate(inv.date),
+            inv.clientDisplay,
+            inv.client.gstin,
+            inv.placeOfSupply,
+            inv.splitGst ? 'CGST + SGST' : 'IGST',
+            inv.taxableSub.toStringAsFixed(2),
+            inv.cgst.toStringAsFixed(2),
+            inv.sgst.toStringAsFixed(2),
+            inv.igst.toStringAsFixed(2),
+            inv.tax.toStringAsFixed(2),
+            inv.total.toStringAsFixed(2),
+            inv.statusLabel,
+          ],
+        ),
+  ];
+  final csv = rows.map((row) => row.map(_safeCell).join(',')).join('\n');
+  return _writeExportFile(
+    'invoy_gst_summary_${DateTime.now().millisecondsSinceEpoch}.csv',
+    csv,
+  );
 }
 
 Map<String, dynamic> createBackupPayload({DateTime? backedUpAt}) {
@@ -103,6 +157,8 @@ Map<String, dynamic> createBackupPayload({DateTime? backedUpAt}) {
     'prefs': {
       'yourName': Prefs.yourName.value,
       'bizName': Prefs.bizName.value,
+      'bizAddress': Prefs.bizAddress.value,
+      'bizState': Prefs.bizState.value,
       'gstNum': Prefs.gstNum.value,
       'upiId': Prefs.upiId.value,
       'upiQrImage': Prefs.upiQrImage.value,
@@ -111,13 +167,18 @@ Map<String, dynamic> createBackupPayload({DateTime? backedUpAt}) {
       'defaultTemplate': Prefs.defaultTemplate.value,
       'lastBackupAt': backupTime,
       'showUpiQr': Prefs.showUpiQr,
+      'showDashboardRecent': Prefs.showDashboardRecent,
+      'haptics': Prefs.haptics,
+      'reduceMotion': Prefs.reduceMotion,
       'splitGst': Prefs.splitGst,
+      'startTab': Prefs.startTab,
       'defaultTermDays': Prefs.defaultTermDays,
       'defaultGst': Prefs.defaultGst,
       'themeMode': Prefs.themeMode.value.name,
       'onboarded': Prefs.onboarded.value,
     },
     'clients': Store.i.clients.map((c) => c.toMap()).toList(),
+    'savedItems': Store.i.savedItems.map((i) => i.toMap()).toList(),
     'invoices': Store.i.all.map((i) => i.toMap()).toList(),
   };
 }
@@ -126,7 +187,9 @@ Future<File> createBackupJsonFile({DateTime? backedUpAt}) async {
   final backup = createBackupPayload(backedUpAt: backedUpAt);
   final json = const JsonEncoder.withIndent('  ').convert(backup);
   return _writeExportFile(
-      'invoy_backup_${DateTime.now().millisecondsSinceEpoch}.json', json);
+    'invoy_backup_${DateTime.now().millisecondsSinceEpoch}.json',
+    json,
+  );
 }
 
 Future<String> exportInvoicesCsv() async {
@@ -139,6 +202,11 @@ Future<String> exportBackupJson({DateTime? backedUpAt}) async {
   return file.path;
 }
 
+Future<String> exportGstSummaryCsv() async {
+  final file = await createGstSummaryCsvFile();
+  return file.path;
+}
+
 Future<String> shareInvoicesCsv() async {
   final file = await createInvoicesCsvFile();
   await Share.shareXFiles([XFile(file.path)], text: 'Invoy invoice export');
@@ -148,6 +216,12 @@ Future<String> shareInvoicesCsv() async {
 Future<String> shareBackupJson({DateTime? backedUpAt}) async {
   final file = await createBackupJsonFile(backedUpAt: backedUpAt);
   await Share.shareXFiles([XFile(file.path)], text: 'Invoy data backup');
+  return file.path;
+}
+
+Future<String> shareGstSummaryCsv() async {
+  final file = await createGstSummaryCsvFile();
+  await Share.shareXFiles([XFile(file.path)], text: 'Invoy GST summary');
   return file.path;
 }
 
@@ -177,6 +251,7 @@ BackupPreview parseBackupJson(String content, {String path = ''}) {
   final root = Map<String, dynamic>.from(decoded);
   final invoicesRaw = root['invoices'];
   final clientsRaw = root['clients'];
+  final savedItemsRaw = root['savedItems'];
   final prefsRaw = root['prefs'];
 
   if (invoicesRaw is! List) {
@@ -201,6 +276,9 @@ BackupPreview parseBackupJson(String content, {String path = ''}) {
   final clients = clientsRaw is List
       ? clientsRaw.map((e) => Customer.fromMap(objectMap(e))).toList()
       : <Customer>[];
+  final savedItems = savedItemsRaw is List
+      ? savedItemsRaw.map((e) => SavedItem.fromMap(objectMap(e))).toList()
+      : <SavedItem>[];
   final prefs = prefsRaw is Map
       ? Map<String, dynamic>.from(prefsRaw)
       : <String, dynamic>{};
@@ -210,6 +288,7 @@ BackupPreview parseBackupJson(String content, {String path = ''}) {
     path: path,
     invoices: invoices,
     clients: clients,
+    savedItems: savedItems,
     prefs: prefs,
     createdAt: createdAtRaw == null ? null : DateTime.tryParse(createdAtRaw),
   );

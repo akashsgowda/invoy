@@ -8,6 +8,11 @@ import '../pdf_builder.dart';
 import 'create.dart';
 import 'pdf_preview_page.dart';
 
+String _pct(double value) {
+  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+  return value.toStringAsFixed(1);
+}
+
 class DetailPage extends StatefulWidget {
   final Invoice invoice;
   final VoidCallback onRefresh;
@@ -27,6 +32,7 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   void _r() {
+    if (!mounted) return;
     widget.onRefresh();
     setState(() {});
   }
@@ -36,6 +42,20 @@ class _DetailPageState extends State<DetailPage> {
       if (!mounted) return;
       _snack('Preparing share sheet');
       await sharePdf(_inv);
+    } catch (_) {
+      if (!mounted) return;
+      _snack('Could not open share sheet');
+    }
+  }
+
+  Future<void> _shareReceipt() async {
+    if (_inv.payments.isEmpty) {
+      _snack('No payments recorded');
+      return;
+    }
+    try {
+      _snack('Preparing receipt');
+      await shareReceiptPdf(_inv);
     } catch (_) {
       if (!mounted) return;
       _snack('Could not open share sheet');
@@ -63,8 +83,8 @@ class _DetailPageState extends State<DetailPage> {
     final newNum = await DB.nextNum();
     final d = _inv.duplicate(uid(), newNum);
     await Store.i.add(d);
-    _r();
     if (!mounted) return;
+    _r();
     final messenger = ScaffoldMessenger.of(context);
     final snack = appSnackBar(context, 'Duplicated as ${d.num}');
     Navigator.pop(context);
@@ -87,7 +107,7 @@ class _DetailPageState extends State<DetailPage> {
     await Store.i.update(_inv);
     if (!mounted) return;
     _r();
-    HapticFeedback.mediumImpact();
+    if (Prefs.haptics) HapticFeedback.mediumImpact();
     await _showDone('Marked paid');
   }
 
@@ -97,16 +117,21 @@ class _DetailPageState extends State<DetailPage> {
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: T.card(context),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text('Clear payments?',
-              style: TextStyle(
-                  color: T.text(context),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 17)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text(
+            'Clear payments?',
+            style: TextStyle(
+              color: T.text(context),
+              fontWeight: FontWeight.w700,
+              fontSize: 17,
+            ),
+          ),
           content: Text(
-              'This removes the recorded payment history and marks the invoice unpaid.',
-              style: TextStyle(color: T.muted(context), fontSize: 13)),
+            'This removes the recorded payment history and marks the invoice unpaid.',
+            style: TextStyle(color: T.muted(context), fontSize: 13),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -114,13 +139,18 @@ class _DetailPageState extends State<DetailPage> {
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: Text('Clear',
-                  style: TextStyle(
-                      color: T.text(context), fontWeight: FontWeight.w700)),
+              child: Text(
+                'Clear',
+                style: TextStyle(
+                  color: T.text(context),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ],
         ),
       );
+      if (!mounted) return;
       if (confirm != true) return;
     }
     setState(() {
@@ -130,8 +160,49 @@ class _DetailPageState extends State<DetailPage> {
     await Store.i.update(_inv);
     if (!mounted) return;
     _r();
-    HapticFeedback.selectionClick();
+    if (Prefs.haptics) HapticFeedback.selectionClick();
     _snack('Marked as unpaid');
+  }
+
+  Future<void> _deleteInvoice() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: T.card(context),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Delete invoice?',
+          style: TextStyle(
+            color: T.text(context),
+            fontWeight: FontWeight.w700,
+            fontSize: 17,
+          ),
+        ),
+        content: Text(
+          'This permanently removes ${_inv.num.isEmpty ? 'this invoice' : _inv.num}.',
+          style: TextStyle(color: T.muted(context), fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: TextStyle(color: T.muted(context))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: C.overdue, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (confirm != true) return;
+    await Store.i.delete(_inv.id);
+    if (!mounted) return;
+    _r();
+    Navigator.pop(context);
   }
 
   Future<void> _recordPayment() async {
@@ -155,13 +226,27 @@ class _DetailPageState extends State<DetailPage> {
       if (!mounted) return;
       _r();
       if (mounted && _inv.displayStatus == Status.paid) {
-        HapticFeedback.mediumImpact();
+        if (Prefs.haptics) HapticFeedback.mediumImpact();
         await _showDone('Marked paid');
+      } else {
+        _snack('Payment recorded');
       }
     }
   }
 
   void _snack(String msg) => showAppSnack(context, msg);
+
+  String _taxBreakupLabel(String label) {
+    final rates = _inv.items
+        .map(_inv.taxRateFor)
+        .where((rate) => rate > 0)
+        .map((rate) => rate.toStringAsFixed(3))
+        .toSet();
+    if (rates.length != 1) return label;
+    final rate = double.parse(rates.first);
+    final shown = label == 'IGST' ? rate : rate / 2;
+    return '$label (${_pct(shown)}%)';
+  }
 
   Future<void> _copyValue(String label, String value) async {
     final clean = value.trim();
@@ -180,57 +265,46 @@ class _DetailPageState extends State<DetailPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Settle invoice',
-                style: TextStyle(
-                    color: T.text(context),
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700)),
+            Text(
+              'Settle invoice',
+              style: TextStyle(
+                color: T.text(context),
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 6),
-            Text('Balance due ${amtUi(_inv.balance)}',
-                style: TextStyle(color: T.muted(context), fontSize: 13)),
+            Text(
+              'Balance due ${amtUi(_inv.balance)}',
+              style: TextStyle(color: T.muted(context), fontSize: 13),
+            ),
             const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () async {
+              child: AppButton(
+                label: 'Mark as paid',
+                icon: Icons.check_circle_outline_rounded,
+                onTap: () async {
                   Navigator.pop(sheetContext);
                   await Future<void>.delayed(const Duration(milliseconds: 80));
                   if (!mounted) return;
                   await _markPaid();
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: T.inverse(context),
-                  foregroundColor: T.onInverse(context),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                ),
-                icon: const Icon(Icons.check_circle_outline_rounded, size: 17),
-                label: const Text('Mark as paid',
-                    style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
               ),
             ),
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
-              child: TextButton(
-                onPressed: () async {
+              child: AppButton(
+                label: 'Record partial payment',
+                tone: AppButtonTone.ghost,
+                height: 46,
+                onTap: () async {
                   Navigator.pop(sheetContext);
                   await Future<void>.delayed(const Duration(milliseconds: 80));
                   if (!mounted) return;
                   await _recordPayment();
                 },
-                style: TextButton.styleFrom(
-                  foregroundColor: T.text(context),
-                  minimumSize: const Size.fromHeight(44),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                ),
-                child: const Text('Record partial payment',
-                    style:
-                        TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
               ),
             ),
           ],
@@ -271,34 +345,45 @@ class _DetailPageState extends State<DetailPage> {
         leading: IconButton(
           tooltip: 'Back',
           onPressed: () => Navigator.pop(context),
-          icon:
-              Icon(Icons.arrow_back_rounded, size: 18, color: T.text(context)),
+          icon: Icon(
+            Icons.arrow_back_rounded,
+            size: 18,
+            color: T.text(context),
+          ),
         ),
         title: Tooltip(
           message: 'Tap to copy invoice number',
           child: GestureDetector(
             onTap: () => _copyValue('Invoice number', _inv.num),
-            child: Text(_inv.num,
-                style: TextStyle(
-                    color: T.faint(context),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400)),
+            child: Text(
+              _inv.num,
+              style: TextStyle(
+                color: T.faint(context),
+                fontSize: 13,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
           ),
         ),
         centerTitle: false,
         actions: [
           PopupMenuButton<String>(
             tooltip: 'Invoice actions',
-            icon: Icon(Icons.more_horiz_rounded,
-                color: T.muted(context), size: 20),
+            icon: Icon(
+              Icons.more_horiz_rounded,
+              color: T.muted(context),
+              size: 20,
+            ),
             color: T.card(context),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
             onSelected: (v) async {
               if (v == 'edit') {
-                Navigator.push(
-                    context,
-                    slideRoute(CreatePage(
+                await Navigator.push(
+                  context,
+                  slideRoute(
+                    CreatePage(
                       invoice: _inv,
                       editing: true,
                       onSaved: (inv) async {
@@ -307,236 +392,336 @@ class _DetailPageState extends State<DetailPage> {
                         setState(() => _inv = inv);
                         _r();
                       },
-                    )));
+                    ),
+                  ),
+                );
+                if (!mounted) return;
               }
               if (v == 'dup') await _dup();
               if (v == 'remind') await _shareReminder();
+              if (v == 'receipt') await _shareReceipt();
               if (v == 'unpaid') await _markUnpaid();
-              if (v == 'del') {
-                await Store.i.delete(_inv.id);
-                if (!mounted) return;
-                _r();
-                if (!context.mounted) return;
-                Navigator.pop(context);
-              }
+              if (v == 'del') await _deleteInvoice();
             },
             itemBuilder: (_) => [
               _menuItem('edit', Icons.edit_outlined, 'Edit', T.text(context)),
               _menuItem(
-                  'dup', Icons.copy_outlined, 'Duplicate', T.text(context)),
+                'dup',
+                Icons.copy_outlined,
+                'Duplicate',
+                T.text(context),
+              ),
               if (canCollect)
-                _menuItem('remind', Icons.chat_bubble_outline_rounded,
-                    'Send Reminder', T.text(context)),
+                _menuItem(
+                  'remind',
+                  Icons.chat_bubble_outline_rounded,
+                  'Send Reminder',
+                  T.text(context),
+                ),
+              if (_inv.payments.isNotEmpty)
+                _menuItem(
+                  'receipt',
+                  Icons.payments_outlined,
+                  'Share Receipt',
+                  T.text(context),
+                ),
               if (isPaid || _inv.payments.isNotEmpty)
                 _menuItem(
-                    'unpaid',
-                    Icons.undo_rounded,
-                    _inv.payments.isNotEmpty
-                        ? 'Clear Payments'
-                        : 'Mark as Unpaid',
-                    T.text(context)),
+                  'unpaid',
+                  Icons.undo_rounded,
+                  _inv.payments.isNotEmpty
+                      ? 'Clear Payments'
+                      : 'Mark as Unpaid',
+                  T.text(context),
+                ),
               _menuItem('del', Icons.delete_outline, 'Delete', C.overdue),
             ],
           ),
           const SizedBox(width: 4),
         ],
       ),
-      body: CustomScrollView(slivers: [
-        // ── Flat header ──
-        SliverToBoxAdapter(
+      body: CustomScrollView(
+        slivers: [
+          // ── Flat header ──
+          SliverToBoxAdapter(
             child: Container(
-          color: T.bg(context),
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(amtUi(_inv.total),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
+              color: T.bg(context),
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    amtUi(_inv.total),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
                       color: T.text(context),
                       fontSize: 36,
                       fontWeight: FontWeight.w600,
-                      letterSpacing: 0)),
-              const SizedBox(height: 10),
-              Row(children: [
-                StatusPill(inv: _inv),
-                const SizedBox(width: 10),
-                Text(_inv.dueDateText,
-                    style: TextStyle(color: T.faint(context), fontSize: 12)),
-              ]),
-            ],
-          ),
-        )),
-
-        // ── Content ──
-        SliverToBoxAdapter(
-            child: Container(
-          decoration: BoxDecoration(
-            color: T.surface(context),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-            border:
-                Border(top: BorderSide(color: T.border(context), width: 0.5)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
-            child: Column(children: [
-              // Customer
-              _section('Customer', [
-                if (_inv.client.name.isNotEmpty)
-                  _row('Name', _inv.client.name, copyable: true),
-                if (_inv.client.email.isNotEmpty)
-                  _row('Email', _inv.client.email, copyable: true),
-                if (_inv.client.phone.isNotEmpty)
-                  _row('Phone', _inv.client.phone, copyable: true),
-                if (_inv.client.address.isNotEmpty)
-                  _row('Address', _inv.client.address, copyable: true),
-                if (_inv.client.gstin.isNotEmpty)
-                  _row('GSTIN', _inv.client.gstin, copyable: true),
-                if (_inv.client.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    child: Text('No customer added',
-                        style:
-                            TextStyle(color: T.faint(context), fontSize: 13)),
+                      letterSpacing: 0,
+                    ),
                   ),
-              ]),
-              const SizedBox(height: 2),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      StatusPill(inv: _inv),
+                      const SizedBox(width: 10),
+                      Text(
+                        _inv.dueDateText,
+                        style: TextStyle(color: T.faint(context), fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
 
-              // Details
-              _section('Details', [
-                _row('Invoice Date', fDate(_inv.date)),
-                _row('Due Date', fDate(_inv.due)),
-                _row(
-                    'Terms',
-                    _inv.termDays == 0
-                        ? 'Due on receipt'
-                        : 'Net ${_inv.termDays}'),
-                _row('Template', _inv.template),
-              ]),
-              const SizedBox(height: 2),
+          // ── Content ──
+          SliverToBoxAdapter(
+            child: Container(
+              decoration: BoxDecoration(
+                color: T.surface(context),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
+                border: Border(
+                  top: BorderSide(color: T.border(context), width: 0.5),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                child: Column(
+                  children: [
+                    // Customer
+                    _section('Customer', [
+                      if (_inv.client.name.isNotEmpty)
+                        _row('Name', _inv.client.name, copyable: true),
+                      if (_inv.client.email.isNotEmpty)
+                        _row('Email', _inv.client.email, copyable: true),
+                      if (_inv.client.phone.isNotEmpty)
+                        _row('Phone', _inv.client.phone, copyable: true),
+                      if (_inv.client.address.isNotEmpty)
+                        _row('Address', _inv.client.address, copyable: true),
+                      if (_inv.client.gstin.isNotEmpty)
+                        _row('GSTIN', _inv.client.gstin, copyable: true),
+                      if (_inv.client.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          child: Text(
+                            'No customer added',
+                            style: TextStyle(
+                              color: T.faint(context),
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                    ]),
+                    const SizedBox(height: 2),
 
-              // Items
-              if (_inv.items.isNotEmpty) ...[
-                _section(
-                  'Items',
-                  _inv.items
-                      .map((item) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            child: Row(children: [
-                              Expanded(
-                                  child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(item.desc,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                          color: T.text(context))),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                      '${item.qty % 1 == 0 ? item.qty.toInt() : item.qty.toStringAsFixed(1)} x ${amtUi(item.rate)}',
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                          fontSize: 11,
-                                          color: T.faint(context))),
-                                ],
-                              )),
-                              const SizedBox(width: 10),
-                              SizedBox(
-                                width: 112,
-                                child: Align(
-                                  alignment: Alignment.centerRight,
-                                  child: Text(amtUi(item.total),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.right,
-                                      style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                          color: T.text(context))),
+                    // Details
+                    _section('Details', [
+                      _row('Invoice Date', fDate(_inv.date)),
+                      _row('Due Date', fDate(_inv.due)),
+                      _row(
+                        'Terms',
+                        _inv.termDays == 0
+                            ? 'Due on receipt'
+                            : 'Net ${_inv.termDays}',
+                      ),
+                      _row('Template', _inv.template),
+                      if (_inv.gst > 0)
+                        _row(
+                          'Tax type',
+                          _inv.splitGst ? 'CGST + SGST' : 'IGST',
+                        ),
+                      if (_inv.gst > 0 &&
+                          (_inv.placeOfSupply.isNotEmpty ||
+                              _inv.client.state.isNotEmpty))
+                        _row(
+                          'Place of supply',
+                          _inv.placeOfSupply.isNotEmpty
+                              ? _inv.placeOfSupply
+                              : _inv.client.state,
+                        ),
+                      if (_inv.gst > 0)
+                        _row(
+                          'Reverse charge',
+                          _inv.reverseCharge ? 'Yes' : 'No',
+                        ),
+                    ]),
+                    const SizedBox(height: 2),
+
+                    // Items
+                    if (_inv.items.isNotEmpty) ...[
+                      _section(
+                        'Items',
+                        _inv.items
+                            .map(
+                              (item) => Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            item.desc,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w500,
+                                              color: T.text(context),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            () {
+                                              final rate = _inv.taxRateFor(
+                                                item,
+                                              );
+                                              final taxText = rate <= 0
+                                                  ? 'No GST'
+                                                  : 'GST ${_pct(rate)}%';
+                                              return '${item.qty % 1 == 0 ? item.qty.toInt() : item.qty.toStringAsFixed(1)} ${item.unit} x ${amtUi(item.rate)}'
+                                                  '${item.hsnSac.isEmpty ? '' : ' · HSN ${item.hsnSac}'}'
+                                                  ' · $taxText';
+                                            }(),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: T.faint(context),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    SizedBox(
+                                      width: 112,
+                                      child: Align(
+                                        alignment: Alignment.centerRight,
+                                        child: Text(
+                                          amtUi(item.total),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.right,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: T.text(context),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ]),
-                          ))
-                      .toList(),
-                ),
-                const SizedBox(height: 2),
-              ],
+                            )
+                            .toList(),
+                      ),
+                      const SizedBox(height: 2),
+                    ],
 
-              // Totals
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20),
-                child: Column(children: [
-                  _totalRow('Subtotal', amtUi(_inv.sub), sub: true),
-                  if (_inv.discountAmount > 0) ...[
-                    const SizedBox(height: 8),
-                    _totalRow('Discount', '-${amtUi(_inv.discountAmount)}',
-                        sub: true),
+                    // Totals
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      child: Column(
+                        children: [
+                          _totalRow('Subtotal', amtUi(_inv.sub), sub: true),
+                          if (_inv.discountAmount > 0) ...[
+                            const SizedBox(height: 8),
+                            _totalRow(
+                              'Discount',
+                              '-${amtUi(_inv.discountAmount)}',
+                              sub: true,
+                            ),
+                          ],
+                          if (_inv.splitGst && _inv.gst > 0) ...[
+                            const SizedBox(height: 8),
+                            _totalRow(
+                              _taxBreakupLabel('CGST'),
+                              amtUi(_inv.cgst),
+                              sub: true,
+                            ),
+                            const SizedBox(height: 6),
+                            _totalRow(
+                              _taxBreakupLabel('SGST'),
+                              amtUi(_inv.sgst),
+                              sub: true,
+                            ),
+                          ] else if (_inv.gst > 0) ...[
+                            const SizedBox(height: 8),
+                            _totalRow(
+                              _taxBreakupLabel('IGST'),
+                              amtUi(_inv.igst),
+                              sub: true,
+                            ),
+                          ],
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            child: Divider(
+                              height: 1,
+                              color: T.divider(context),
+                            ),
+                          ),
+                          _totalRow('Total', amtUi(_inv.total), bold: true),
+                          if (_inv.paidAmt > 0 && _inv.balance > 0) ...[
+                            const SizedBox(height: 10),
+                            _totalRow(
+                              'Paid',
+                              amtUi(_inv.paidAmt),
+                              valueColor: C.paid,
+                            ),
+                            const SizedBox(height: 10),
+                            _totalRow(
+                              'Balance Due',
+                              amtUi(_inv.balance),
+                              valueColor: C.overdue,
+                              bold: true,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    // Notes
+                    if (_inv.notes.isNotEmpty) ...[
+                      _section('Notes', [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          child: Text(
+                            _inv.notes,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: T.muted(context),
+                              height: 1.6,
+                            ),
+                          ),
+                        ),
+                      ]),
+                      const SizedBox(height: 2),
+                    ],
+
+                    // Payment history
+                    if (_inv.payments.isNotEmpty) ...[
+                      _section('Payment history', [_paymentHistoryCard()]),
+                    ],
+
+                    const SizedBox(height: 120),
                   ],
-                  if (_inv.splitGst && _inv.gst > 0) ...[
-                    const SizedBox(height: 8),
-                    _totalRow('CGST (${(_inv.gst / 2).toStringAsFixed(1)}%)',
-                        amtUi(_inv.cgst),
-                        sub: true),
-                    const SizedBox(height: 6),
-                    _totalRow('SGST (${(_inv.gst / 2).toStringAsFixed(1)}%)',
-                        amtUi(_inv.sgst),
-                        sub: true),
-                  ] else if (_inv.gst > 0) ...[
-                    const SizedBox(height: 8),
-                    _totalRow('GST (${_inv.gst.toStringAsFixed(0)}%)',
-                        amtUi(_inv.tax),
-                        sub: true),
-                  ],
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    child: Divider(height: 1, color: T.divider(context)),
-                  ),
-                  _totalRow('Total', amtUi(_inv.total), bold: true),
-                  if (_inv.paidAmt > 0 && _inv.balance > 0) ...[
-                    const SizedBox(height: 10),
-                    _totalRow('Paid', amtUi(_inv.paidAmt), valueColor: C.paid),
-                    const SizedBox(height: 10),
-                    _totalRow('Balance Due', amtUi(_inv.balance),
-                        valueColor: C.overdue, bold: true),
-                  ],
-                ]),
+                ),
               ),
-
-              // Notes
-              if (_inv.notes.isNotEmpty) ...[
-                _section('Notes', [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    child: Text(_inv.notes,
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: T.muted(context),
-                            height: 1.6)),
-                  ),
-                ]),
-                const SizedBox(height: 2),
-              ],
-
-              // Payment history
-              if (_inv.payments.isNotEmpty) ...[
-                _section(
-                  'Payment history',
-                  [
-                    _paymentHistoryCard(),
-                  ],
-                ),
-              ],
-
-              const SizedBox(height: 120),
-            ]),
+            ),
           ),
-        )),
-      ]),
+        ],
+      ),
       bottomNavigationBar: _bottomBar(isPaid),
     );
   }
@@ -554,48 +739,43 @@ class _DetailPageState extends State<DetailPage> {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            // Primary: Share invoice
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _shareInvoice,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: T.inverse(context),
-                  foregroundColor: T.onInverse(context),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  elevation: 0,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Primary: Share invoice
+              SizedBox(
+                width: double.infinity,
+                child: AppButton(
+                  label: 'Share invoice',
+                  icon: Icons.share_rounded,
+                  onTap: _shareInvoice,
                 ),
-                icon: const Icon(Icons.share_rounded, size: 17),
-                label: const Text('Share invoice',
-                    style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
               ),
-            ),
-            const SizedBox(height: 10),
+              const SizedBox(height: 10),
 
-            Row(children: [
-              Expanded(
-                child: _bottomOutlineButton(
-                  icon: Icons.visibility_outlined,
-                  label: 'Preview PDF',
-                  onPressed: _pdf,
-                ),
-              ),
-              if (canCollect) ...[
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _bottomOutlineButton(
-                    icon: Icons.account_balance_wallet_outlined,
-                    label: 'Settle invoice',
-                    onPressed: _openSettleInvoice,
+              Row(
+                children: [
+                  Expanded(
+                    child: _bottomOutlineButton(
+                      icon: Icons.visibility_outlined,
+                      label: 'Preview PDF',
+                      onPressed: _pdf,
+                    ),
                   ),
-                ),
-              ],
-            ]),
-          ]),
+                  if (canCollect) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _bottomOutlineButton(
+                        icon: Icons.account_balance_wallet_outlined,
+                        label: 'Settle invoice',
+                        onPressed: _openSettleInvoice,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -608,20 +788,12 @@ class _DetailPageState extends State<DetailPage> {
     required String label,
     required VoidCallback onPressed,
   }) =>
-      OutlinedButton.icon(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: T.text(context),
-          side: BorderSide(color: T.border(context)),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-        ),
-        icon: Icon(icon, size: 15),
-        label: Text(label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      AppButton(
+        label: label,
+        icon: icon,
+        onTap: onPressed,
+        tone: AppButtonTone.secondary,
+        height: 50,
       );
 
   Widget _paymentHistoryCard() => Container(
@@ -632,85 +804,115 @@ class _DetailPageState extends State<DetailPage> {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: T.border(context), width: 0.5),
         ),
-        child: Column(children: [
-          _paymentMetricRow('Paid so far', amtUi(_inv.paidAmt)),
-          if (_inv.balance > 0) ...[
-            const SizedBox(height: 8),
-            _paymentMetricRow('Balance due', amtUi(_inv.balance), strong: true),
+        child: Column(
+          children: [
+            _paymentMetricRow('Paid so far', amtUi(_inv.paidAmt)),
+            if (_inv.balance > 0) ...[
+              const SizedBox(height: 8),
+              _paymentMetricRow('Balance due', amtUi(_inv.balance),
+                  strong: true),
+            ],
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Divider(height: 1, color: T.divider(context)),
+            ),
+            ..._inv.payments.asMap().entries.map(
+                  (entry) => Column(
+                    children: [
+                      _paymentRow(entry.value),
+                      if (entry.key != _inv.payments.length - 1)
+                        Divider(height: 1, color: T.divider(context)),
+                    ],
+                  ),
+                ),
           ],
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Divider(height: 1, color: T.divider(context)),
-          ),
-          ..._inv.payments.asMap().entries.map((entry) => Column(children: [
-                _paymentRow(entry.value),
-                if (entry.key != _inv.payments.length - 1)
-                  Divider(height: 1, color: T.divider(context)),
-              ])),
-        ]),
+        ),
       );
 
   Widget _paymentMetricRow(String label, String value, {bool strong = false}) =>
-      Row(children: [
-        Text(label,
+      Row(
+        children: [
+          Text(
+            label,
             style: TextStyle(
-                fontSize: strong ? 14 : 13,
-                fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
-                color: strong ? T.text(context) : T.muted(context))),
-        const Spacer(),
-        Flexible(
-          child: Text(value,
+              fontSize: strong ? 14 : 13,
+              fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
+              color: strong ? T.text(context) : T.muted(context),
+            ),
+          ),
+          const Spacer(),
+          Flexible(
+            child: Text(
+              value,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,
               style: TextStyle(
-                  fontSize: strong ? 15 : 13,
-                  fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
-                  color: T.text(context))),
-        ),
-      ]);
+                fontSize: strong ? 15 : 13,
+                fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
+                color: T.text(context),
+              ),
+            ),
+          ),
+        ],
+      );
 
   Widget _section(String title, List<Widget> children) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Text(title.toUpperCase(),
-                style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: T.faint(context),
-                    letterSpacing: 0.8)),
+            child: Text(
+              title.toUpperCase(),
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: T.faint(context),
+                letterSpacing: 0.8,
+              ),
+            ),
           ),
-          ...children.map((c) => Column(children: [
+          ...children.map(
+            (c) => Column(
+              children: [
                 c,
                 if (c != children.last)
                   Divider(height: 1, color: T.divider(context)),
-              ])),
+              ],
+            ),
+          ),
           const SizedBox(height: 20),
         ],
       );
 
   Widget _row(String l, String v, {bool copyable = false}) {
-    final value = Text(v,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.right,
-        style: TextStyle(
-            fontSize: 13, fontWeight: FontWeight.w500, color: T.text(context)));
+    final value = Text(
+      v,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.right,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: T.text(context),
+      ),
+    );
     final valueWidget = copyable
         ? Tooltip(
             message: 'Tap to copy $l',
-            child: InkWell(
-              borderRadius: BorderRadius.circular(8),
+            child: SpringTap(
               onTap: () => _copyValue(l, v),
+              scale: 0.985,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                  Flexible(child: value),
-                  const SizedBox(width: 6),
-                  Icon(Icons.copy_rounded, size: 12, color: T.faint(context)),
-                ]),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Flexible(child: value),
+                    const SizedBox(width: 6),
+                    Icon(Icons.copy_rounded, size: 12, color: T.faint(context)),
+                  ],
+                ),
               ),
             ),
           )
@@ -718,76 +920,104 @@ class _DetailPageState extends State<DetailPage> {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(children: [
-        Expanded(
-          flex: 2,
-          child: Text(l,
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(
+              l,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 13, color: T.faint(context))),
-        ),
-        const SizedBox(width: 12),
-        Expanded(flex: 3, child: valueWidget),
-      ]),
+              style: TextStyle(fontSize: 13, color: T.faint(context)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(flex: 3, child: valueWidget),
+        ],
+      ),
     );
   }
 
-  Widget _totalRow(String l, String v,
-          {bool sub = false, bool bold = false, Color? valueColor}) =>
-      Row(children: [
-        Expanded(
-          flex: 3,
-          child: Text(l,
+  Widget _totalRow(
+    String l,
+    String v, {
+    bool sub = false,
+    bool bold = false,
+    Color? valueColor,
+  }) =>
+      Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Text(
+              l,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  fontSize: sub ? 12 : 14,
-                  color: sub ? T.faint(context) : T.muted(context))),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          flex: 2,
-          child: Text(v,
+                fontSize: sub ? 12 : 14,
+                color: sub ? T.faint(context) : T.muted(context),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: Text(
+              v,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,
               style: TextStyle(
-                  fontSize: sub ? 12 : 14,
-                  fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
-                  color: valueColor ??
-                      (sub ? T.faint(context) : T.text(context)))),
-        ),
-      ]);
+                fontSize: sub ? 12 : 14,
+                fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
+                color: valueColor ?? (sub ? T.faint(context) : T.text(context)),
+              ),
+            ),
+          ),
+        ],
+      );
 
   Widget _paymentRow(Payment p) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(children: [
-          Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(_paymentModeLabel(p.mode),
-                  style: TextStyle(
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _paymentModeLabel(p.mode),
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: T.text(context))),
-              const SizedBox(height: 3),
-              Text(fDate(p.date),
-                  style: TextStyle(fontSize: 11, color: T.faint(context))),
-            ]),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 126,
-            child: Text(amtUi(p.amount),
+                      color: T.text(context),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    fDate(p.date),
+                    style: TextStyle(fontSize: 11, color: T.faint(context)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 126,
+              child: Text(
+                amtUi(p.amount),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.right,
                 style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: T.text(context))),
-          ),
-        ]),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: T.text(context),
+                ),
+              ),
+            ),
+          ],
+        ),
       );
 
   String _paymentModeLabel(PayMode mode) => switch (mode) {
@@ -798,14 +1028,20 @@ class _DetailPageState extends State<DetailPage> {
       };
 
   PopupMenuItem<String> _menuItem(
-          String v, IconData icon, String label, Color color) =>
+    String v,
+    IconData icon,
+    String label,
+    Color color,
+  ) =>
       PopupMenuItem(
         value: v,
-        child: Row(children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 10),
-          Text(label, style: TextStyle(fontSize: 14, color: color)),
-        ]),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 10),
+            Text(label, style: TextStyle(fontSize: 14, color: color)),
+          ],
+        ),
       );
 }
 
@@ -859,24 +1095,33 @@ class _DonePulseState extends State<_DonePulse> {
                 border: Border.all(color: T.border(context), width: 0.5),
                 boxShadow: T.shadow(context),
               ),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: T.inverse(context),
-                    shape: BoxShape.circle,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: T.inverse(context),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.check_rounded,
+                      color: T.onInverse(context),
+                      size: 28,
+                    ),
                   ),
-                  child: Icon(Icons.check_rounded,
-                      color: T.onInverse(context), size: 28),
-                ),
-                const SizedBox(height: 12),
-                Text(widget.title,
+                  const SizedBox(height: 12),
+                  Text(
+                    widget.title,
                     style: TextStyle(
-                        color: T.text(context),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700)),
-              ]),
+                      color: T.text(context),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

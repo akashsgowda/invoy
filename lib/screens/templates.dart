@@ -39,30 +39,38 @@ class _TemplatesPageState extends State<TemplatesPage> {
             icon: Icon(Icons.arrow_back_rounded,
                 size: 18, color: T.text(context)),
           ),
-          title: Text('PDF Style',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: T.text(context))),
+          title: Text(
+            'PDF Style',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: T.text(context),
+            ),
+          ),
           centerTitle: true,
         ),
         body: ListView(
           padding: const EdgeInsets.fromLTRB(20, 18, 20, 88),
           children: [
-            Text('Default style',
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: T.muted(context))),
+            Text(
+              'Default style',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: T.muted(context),
+              ),
+            ),
             const SizedBox(height: 10),
-            ...kTemplates.map((t) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _TemplateRow(
-                    tpl: t,
-                    active: _sel == t.name,
-                    onTap: () => _select(t.name),
-                  ),
-                )),
+            ...kTemplates.map(
+              (t) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _TemplateRow(
+                  tpl: t,
+                  active: _sel == t.name,
+                  onTap: () => _select(t.name),
+                ),
+              ),
+            ),
           ],
         ),
       );
@@ -79,38 +87,42 @@ class _TemplateRow extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Material(
-        color: T.card(context),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: kSmooth,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                  color: active ? T.text(context) : T.border(context),
-                  width: active ? 1 : 0.5),
+  Widget build(BuildContext context) => SpringTap(
+        onTap: onTap,
+        scale: 0.975,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: kSmooth,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: T.card(context),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: active ? T.text(context) : T.border(context),
+              width: active ? 1 : 0.5,
             ),
-            child: Row(children: [
+          ),
+          child: Row(
+            children: [
               _TemplatePreview(tpl: tpl),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(tpl.name,
-                        style: TextStyle(
-                            color: T.text(context),
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700)),
+                    Text(
+                      tpl.name,
+                      style: TextStyle(
+                        color: T.text(context),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const SizedBox(height: 3),
-                    Text(tpl.description,
-                        style:
-                            TextStyle(color: T.muted(context), fontSize: 12)),
+                    Text(
+                      tpl.description,
+                      style: TextStyle(color: T.muted(context), fontSize: 12),
+                    ),
                   ],
                 ),
               ),
@@ -127,11 +139,14 @@ class _TemplateRow extends StatelessWidget {
                       : Border.all(color: T.border(context), width: 1),
                 ),
                 child: active
-                    ? Icon(Icons.check_rounded,
-                        color: T.onInverse(context), size: 14)
+                    ? Icon(
+                        Icons.check_rounded,
+                        color: T.onInverse(context),
+                        size: 14,
+                      )
                     : null,
               ),
-            ]),
+            ],
           ),
         ),
       );
@@ -160,9 +175,7 @@ class _TemplatePreview extends StatelessWidget {
                 ],
         ),
         clipBehavior: Clip.antiAlias,
-        child: CustomPaint(
-          painter: _TemplatePreviewPainter(tpl),
-        ),
+        child: CustomPaint(painter: _TemplatePreviewPainter(tpl)),
       );
 }
 
@@ -190,8 +203,11 @@ class _TemplatePreviewPainter extends CustomPainter {
         line(7, 9, 16, paint: primary, h: 3);
         line(7, 17, 32, paint: soft);
         line(7, 23, 24, paint: soft);
-        canvas.drawLine(const Offset(7, 33), Offset(size.width - 7, 33),
-            Paint()..color = const Color(0xFFD1D5DB));
+        canvas.drawLine(
+          const Offset(7, 33),
+          Offset(size.width - 7, 33),
+          Paint()..color = const Color(0xFFD1D5DB),
+        );
         line(7, 41, 38, paint: accent);
         line(7, 48, 26, paint: soft);
         line(size.width - 25, 56, 18, paint: primary, h: 3);
@@ -199,8 +215,13 @@ class _TemplatePreviewPainter extends CustomPainter {
       case 'Ledger':
         canvas.drawRRect(rr(6, 7, size.width - 12, 15, 4), primary);
         line(10, 12, 17, paint: Paint()..color = Colors.white, h: 2);
-        line(size.width - 22, 12, 12,
-            paint: Paint()..color = Colors.white, h: 2);
+        line(
+          size.width - 22,
+          12,
+          12,
+          paint: Paint()..color = Colors.white,
+          h: 2,
+        );
         canvas.drawRRect(rr(7, 28, 11, 8, 3), accent);
         canvas.drawRRect(rr(21, 28, 11, 8, 3), accent);
         canvas.drawRRect(rr(35, 28, 10, 8, 3), accent);
@@ -209,14 +230,17 @@ class _TemplatePreviewPainter extends CustomPainter {
         }
         break;
       case 'Compact':
-        canvas.drawRRect(rr(13, 4, size.width - 26, size.height - 8, 2),
-            Paint()..color = Colors.white);
         canvas.drawRRect(
-            rr(13, 4, size.width - 26, size.height - 8, 2),
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 0.8
-              ..color = const Color(0xFFE5E7EB));
+          rr(13, 4, size.width - 26, size.height - 8, 2),
+          Paint()..color = Colors.white,
+        );
+        canvas.drawRRect(
+          rr(13, 4, size.width - 26, size.height - 8, 2),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.8
+            ..color = const Color(0xFFE5E7EB),
+        );
         line(18, 11, 16, paint: ink, h: 2.4);
         for (final x in [18.0, 26.0, 34.0]) {
           line(x, 21, 4, paint: primary, h: 1.2);

@@ -7,10 +7,12 @@ import 'screens/shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.dark,
-  ));
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+    ),
+  );
   runApp(const InvoyApp());
 }
 
@@ -30,7 +32,9 @@ class InvoyApp extends StatelessWidget {
           themeMode: mode,
           theme: buildTheme(false),
           darkTheme: buildTheme(true),
-          themeAnimationDuration: const Duration(milliseconds: 220),
+          themeAnimationDuration: Prefs.reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 220),
           themeAnimationCurve: kSmooth,
           builder: (context, child) {
             final dark = Theme.of(context).brightness == Brightness.dark;
@@ -41,7 +45,7 @@ class InvoyApp extends StatelessWidget {
                     dark ? Brightness.light : Brightness.dark,
                 statusBarBrightness: dark ? Brightness.dark : Brightness.light,
                 systemNavigationBarColor:
-                    dark ? C.black : const Color(0xFFF4F5F7),
+                    dark ? C.dkBg : const Color(0xFFF8F7F4),
                 systemNavigationBarIconBrightness:
                     dark ? Brightness.light : Brightness.dark,
               ),
@@ -110,20 +114,28 @@ class _StartupScreen extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
         backgroundColor: T.bg(context),
         body: Center(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                  strokeWidth: 1.6, color: T.muted(context)),
-            ),
-            const SizedBox(height: 18),
-            Text('Starting Invoy',
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.6,
+                  color: T.muted(context),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Starting Invoy',
                 style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: T.text(context))),
-          ]),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: T.text(context),
+                ),
+              ),
+            ],
+          ),
         ),
       );
 }
@@ -142,16 +154,23 @@ class _StartupError extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Spacer(),
-                Text('Invoy could not start',
-                    style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
-                        color: T.text(context))),
+                Text(
+                  'Invoy could not start',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    color: T.text(context),
+                  ),
+                ),
                 const SizedBox(height: 10),
                 Text(
-                    'Something took too long while opening local app data. Try again once.',
-                    style: TextStyle(
-                        fontSize: 14, height: 1.5, color: T.muted(context))),
+                  'Something took too long while opening local app data. Try again once.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: T.muted(context),
+                  ),
+                ),
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,

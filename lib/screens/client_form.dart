@@ -18,6 +18,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
   late final TextEditingController _phoneC;
   late final TextEditingController _gstinC;
   late final TextEditingController _addrC;
+  late final TextEditingController _stateC;
 
   bool get _editing => widget.client != null;
 
@@ -30,6 +31,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
     _phoneC = TextEditingController(text: c.phone);
     _gstinC = TextEditingController(text: c.gstin);
     _addrC = TextEditingController(text: c.address);
+    _stateC = TextEditingController(text: c.state);
   }
 
   @override
@@ -39,25 +41,33 @@ class _ClientFormPageState extends State<ClientFormPage> {
     _phoneC.dispose();
     _gstinC.dispose();
     _addrC.dispose();
+    _stateC.dispose();
     super.dispose();
   }
 
   void _save() {
     if (_nameC.text.trim().isEmpty) {
-      HapticFeedback.mediumImpact();
+      if (Prefs.haptics) HapticFeedback.mediumImpact();
       showAppSnack(context, 'Enter a client name');
+      return;
+    }
+    if (!isValidGstin(_gstinC.text)) {
+      if (Prefs.haptics) HapticFeedback.mediumImpact();
+      showAppSnack(context, 'Enter a valid 15-character GSTIN');
       return;
     }
 
     Navigator.pop(
-        context,
-        Customer(
-          name: _nameC.text.trim(),
-          email: _emailC.text.trim(),
-          phone: _phoneC.text.trim(),
-          address: _addrC.text.trim(),
-          gstin: _gstinC.text.trim(),
-        ));
+      context,
+      Customer(
+        name: _nameC.text.trim(),
+        email: _emailC.text.trim(),
+        phone: _phoneC.text.trim(),
+        address: _addrC.text.trim(),
+        gstin: cleanGstin(_gstinC.text),
+        state: _stateC.text.trim(),
+      ),
+    );
   }
 
   @override
@@ -71,15 +81,19 @@ class _ClientFormPageState extends State<ClientFormPage> {
             tooltip: _editing ? 'Back' : 'Close',
             onPressed: () => Navigator.pop(context),
             icon: Icon(
-                _editing ? Icons.arrow_back_rounded : Icons.close_rounded,
-                size: 20,
-                color: T.text(context)),
+              _editing ? Icons.arrow_back_rounded : Icons.close_rounded,
+              size: 20,
+              color: T.text(context),
+            ),
           ),
-          title: Text(_editing ? 'Edit Client' : 'Add Client',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: T.text(context))),
+          title: Text(
+            _editing ? 'Edit Client' : 'Add Client',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: T.text(context),
+            ),
+          ),
           centerTitle: true,
         ),
         body: ListView(
@@ -104,39 +118,42 @@ class _ClientFormPageState extends State<ClientFormPage> {
               decoration: _fieldDecoration('client@example.com'),
             ),
             const SizedBox(height: 20),
-            Row(children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _fieldLabel('Phone'),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _phoneC,
-                      keyboardType: TextInputType.phone,
-                      style: TextStyle(color: T.text(context), fontSize: 14),
-                      decoration: _fieldDecoration('0000000000'),
-                    ),
-                  ],
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _fieldLabel('Phone'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _phoneC,
+                        keyboardType: TextInputType.phone,
+                        style: TextStyle(color: T.text(context), fontSize: 14),
+                        decoration: _fieldDecoration('0000000000'),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _fieldLabel('GSTIN'),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _gstinC,
-                      textCapitalization: TextCapitalization.characters,
-                      style: TextStyle(color: T.text(context), fontSize: 14),
-                      decoration: _fieldDecoration('22AAAAA0000A1Z5'),
-                    ),
-                  ],
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _fieldLabel('GSTIN'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _gstinC,
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: gstinInputFormatters,
+                        style: TextStyle(color: T.text(context), fontSize: 14),
+                        decoration: _fieldDecoration('22AAAAA0000A1Z5'),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ]),
+              ],
+            ),
             const SizedBox(height: 20),
             _fieldLabel('Address'),
             const SizedBox(height: 8),
@@ -147,36 +164,38 @@ class _ClientFormPageState extends State<ClientFormPage> {
               style: TextStyle(color: T.text(context), fontSize: 14),
               decoration: _fieldDecoration('123 Example Street'),
             ),
+            const SizedBox(height: 20),
+            _fieldLabel('State / Place of supply'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _stateC,
+              textCapitalization: TextCapitalization.words,
+              style: TextStyle(color: T.text(context), fontSize: 14),
+              decoration: _fieldDecoration('Karnataka'),
+            ),
           ],
         ),
         bottomNavigationBar: SafeArea(
           child: Container(
             color: T.bg(context),
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-            child: ElevatedButton(
-              onPressed: _save,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: T.inverse(context),
-                foregroundColor: T.onInverse(context),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                elevation: 0,
-              ),
-              child: Text(_editing ? 'Save Changes' : 'Save Client',
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w600)),
+            child: AppButton(
+              label: _editing ? 'Save Changes' : 'Save Client',
+              onTap: _save,
             ),
           ),
         ),
       );
 
-  Widget _fieldLabel(String t) => Text(t,
-      style: TextStyle(
+  Widget _fieldLabel(String t) => Text(
+        t,
+        style: TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w500,
           color: T.muted(context),
-          letterSpacing: 0));
+          letterSpacing: 0,
+        ),
+      );
 
   InputDecoration _fieldDecoration(String hint) => InputDecoration(
         hintText: hint,
@@ -186,16 +205,19 @@ class _ClientFormPageState extends State<ClientFormPage> {
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(22),
           borderSide: BorderSide(color: T.border(context), width: 0.5),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(22),
           borderSide: BorderSide(color: T.border(context), width: 0.5),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: T.text(context), width: 1),
+          borderRadius: BorderRadius.circular(22),
+          borderSide: BorderSide(
+            color: T.accent(context).withValues(alpha: 0.26),
+            width: 1,
+          ),
         ),
       );
 }

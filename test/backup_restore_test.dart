@@ -18,15 +18,9 @@ void main() {
         email: 'billing@example.com',
         phone: '0000000000',
       ),
-      items: [
-        LineItem(id: 'item-1', desc: 'Design work', qty: 2, rate: 1500),
-      ],
+      items: [LineItem(id: 'item-1', desc: 'Design work', qty: 2, rate: 1500)],
       payments: [
-        Payment(
-          amount: 1000,
-          date: DateTime(2026, 6, 20),
-          mode: PayMode.upi,
-        ),
+        Payment(amount: 1000, date: DateTime(2026, 6, 20), mode: PayMode.upi),
       ],
       gst: 18,
       discountValue: 10,
