@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme.dart';
 import '../models.dart';
 import '../widgets.dart';
@@ -18,12 +19,23 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> {
   late int _tab = Prefs.startTab;
   int _invoiceTab = 0;
-  bool _loaded = false;
+  int _invoiceNavigationRequest = 0;
+  late final Widget _dashboardPage;
+  late final Widget _clientsPage;
+  bool _loaded = Store.i.isLoaded;
   bool _loadError = false;
+  bool _openingInvoice = false;
+  bool _openingClient = false;
 
   @override
   void initState() {
     super.initState();
+    _dashboardPage = DashboardPage(
+      onSeeAll: () => _openInvoices(0),
+      onOpenInvoices: _openInvoices,
+    );
+    _clientsPage = ClientsPage(onAddClient: _newClient);
+    if (_loaded) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_loadData());
     });
@@ -65,7 +77,10 @@ class _ShellState extends State<Shell> {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _tab = i;
-      if (i == 1) _invoiceTab = 0;
+      if (i == 1) {
+        _invoiceTab = 0;
+        _invoiceNavigationRequest++;
+      }
     });
   }
 
@@ -73,40 +88,47 @@ class _ShellState extends State<Shell> {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _invoiceTab = filterTab.clamp(0, 3);
+      _invoiceNavigationRequest++;
       _tab = 1;
     });
   }
 
-  void _newInvoice() {
-    Store.i.create().then((inv) {
+  Future<void> _newInvoice() async {
+    if (_openingInvoice) return;
+    _openingInvoice = true;
+    try {
+      final inv = await Store.i.create();
       if (!mounted) return;
-      Navigator.push(
+      final changed = await Navigator.push<bool>(
         context,
         slideRoute(
           CreatePage(
             invoice: inv,
-            onSaved: (v) async {
-              await Store.i.add(v);
-              if (!mounted) return;
-              _refresh();
-            },
+            onSaved: Store.i.add,
           ),
         ),
-      ).then((_) {
-        if (mounted) _refresh();
-      });
-    });
+      );
+      if (changed == true && mounted) _refresh();
+    } finally {
+      _openingInvoice = false;
+    }
   }
 
   Future<void> _newClient() async {
-    final c = await Navigator.push<Customer>(
-      context,
-      slideRoute(const ClientFormPage()),
-    );
-    if (c == null || c.name.trim().isEmpty) return;
-    await Store.i.saveClient(c);
-    if (!mounted) return;
-    _refresh();
+    if (_openingClient) return;
+    _openingClient = true;
+    try {
+      final c = await Navigator.push<Customer>(
+        context,
+        slideRoute(const ClientFormPage()),
+      );
+      if (c == null || c.name.trim().isEmpty) return;
+      await Store.i.saveClient(c);
+      if (!mounted) return;
+      _refresh();
+    } finally {
+      _openingClient = false;
+    }
   }
 
   @override
@@ -120,39 +142,27 @@ class _ShellState extends State<Shell> {
     if (_loadError) {
       return _ShellLoadError(onRetry: _retryLoad);
     }
-    final pages = [
-      DashboardPage(
-        onSeeAll: () => _openInvoices(0),
-        onOpenInvoices: _openInvoices,
-      ),
+    final pages = <Widget>[
+      _dashboardPage,
       InvoicesPage(
         onRefresh: _refresh,
         initialTab: _invoiceTab,
+        navigationRequest: _invoiceNavigationRequest,
       ),
-      ClientsPage(onAddClient: _newClient),
+      _clientsPage,
     ];
 
     return Scaffold(
       backgroundColor: T.bg(context),
-      body: Stack(
-        fit: StackFit.expand,
-        children: List.generate(pages.length, (i) {
-          final active = i == _tab;
-          return IgnorePointer(
-            ignoring: !active,
-            child: AnimatedOpacity(
-              opacity: active ? 1 : 0,
-              duration: Prefs.reduceMotion
-                  ? Duration.zero
-                  : const Duration(milliseconds: 150),
-              curve: kSmooth,
-              child: TickerMode(
-                enabled: active,
-                child: pages[i],
-              ),
-            ),
-          );
-        }),
+      body: IndexedStack(
+        index: _tab,
+        children: List.generate(
+          pages.length,
+          (i) => TickerMode(
+            enabled: i == _tab,
+            child: RepaintBoundary(child: pages[i]),
+          ),
+        ),
       ),
       bottomNavigationBar: _BottomNav(
         tab: _tab,
@@ -275,10 +285,9 @@ class _BottomNav extends StatelessWidget {
               return Stack(
                 children: [
                   AnimatedPositioned(
-                    duration: Prefs.reduceMotion
-                        ? Duration.zero
-                        : const Duration(milliseconds: 260),
-                    curve: kSpring,
+                    duration:
+                        Prefs.reduceMotion ? Duration.zero : kSegmentDuration,
+                    curve: kSmooth,
                     left: itemW * tab + 6,
                     top: 6,
                     bottom: 6,
@@ -364,27 +373,38 @@ class _NavItem extends StatelessWidget {
         selected: active,
         label: label,
         child: SpringTap(
-          onTap: () => onTap(i),
-          scale: 0.94,
+          haptic: false,
+          onTap: () {
+            if (Prefs.haptics) HapticFeedback.selectionClick();
+            onTap(i);
+          },
+          scale: 0.955,
           hoverScale: 1.006,
           child: SizedBox(
             height: 62,
             child: Center(
               child: AnimatedDefaultTextStyle(
-                duration: Prefs.reduceMotion
-                    ? Duration.zero
-                    : const Duration(milliseconds: 190),
+                duration:
+                    Prefs.reduceMotion ? Duration.zero : kSegmentTextDuration,
                 curve: kSmooth,
                 style: TextStyle(
                   color: fg,
-                  fontSize: active ? 11.5 : 10.5,
+                  fontSize: 11,
                   fontWeight: active ? FontWeight.w900 : FontWeight.w700,
                   letterSpacing: 0,
                 ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(icon, size: active ? 19 : 18, color: fg),
+                    TweenAnimationBuilder<Color?>(
+                      duration: Prefs.reduceMotion
+                          ? Duration.zero
+                          : kSegmentTextDuration,
+                      curve: kSmooth,
+                      tween: ColorTween(end: fg),
+                      builder: (_, color, __) =>
+                          Icon(icon, size: 18.5, color: color),
+                    ),
                     const SizedBox(height: 4),
                     Text(
                       label,

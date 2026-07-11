@@ -33,7 +33,7 @@ class _DashboardMetrics {
 
   factory _DashboardMetrics.build(List<Invoice> all, _Period period) {
     final now = DateTime.now();
-    final filtered = <Invoice>[];
+    final filteredCollections = <InvoiceCollection>[];
     var revenue = 0.0;
     var prevRevenue = 0.0;
     var pending = 0.0;
@@ -44,39 +44,41 @@ class _DashboardMetrics {
     bool sameMonth(DateTime date, DateTime target) =>
         date.year == target.year && date.month == target.month;
 
-    bool inCurrent(Invoice inv) {
+    bool inCurrent(DateTime date) {
       switch (period) {
         case _Period.thisMonth:
-          return sameMonth(inv.date, now);
+          return sameMonth(date, now);
         case _Period.lastMonth:
-          return sameMonth(inv.date, DateTime(now.year, now.month - 1));
+          return sameMonth(date, DateTime(now.year, now.month - 1));
         case _Period.thisYear:
-          return inv.date.year == now.year;
+          return date.year == now.year;
         case _Period.allTime:
           return true;
       }
     }
 
-    bool inPrevious(Invoice inv) {
+    bool inPrevious(DateTime date) {
       switch (period) {
         case _Period.thisMonth:
-          return sameMonth(inv.date, DateTime(now.year, now.month - 1));
+          return sameMonth(date, DateTime(now.year, now.month - 1));
         case _Period.lastMonth:
-          return sameMonth(inv.date, DateTime(now.year, now.month - 2));
+          return sameMonth(date, DateTime(now.year, now.month - 2));
         case _Period.thisYear:
-          return inv.date.year == now.year - 1;
+          return date.year == now.year - 1;
         case _Period.allTime:
           return false;
       }
     }
 
+    final collections = <InvoiceCollection>[];
     for (final inv in all) {
-      if (inPrevious(inv)) {
-        prevRevenue += inv.collectedAmt;
-      }
-      if (!inCurrent(inv)) continue;
-      filtered.add(inv);
-      revenue += inv.collectedAmt;
+      collections.addAll(inv.collections);
+    }
+    for (final collection in collections) {
+      if (inPrevious(collection.date)) prevRevenue += collection.amount;
+      if (!inCurrent(collection.date)) continue;
+      filteredCollections.add(collection);
+      revenue += collection.amount;
     }
 
     for (final inv in all) {
@@ -90,13 +92,14 @@ class _DashboardMetrics {
       }
     }
 
-    final points = _trendPointsFor(all, period, now);
+    final points = _trendPointsFor(all, collections, period, now);
     final buckets = <int, double>{};
-    for (final inv in filtered) {
+    for (final collection in filteredCollections) {
+      final date = collection.date;
       final key = period == _Period.thisYear || period == _Period.allTime
-          ? inv.date.year * 100 + inv.date.month
-          : inv.date.year * 10000 + inv.date.month * 100 + inv.date.day;
-      buckets[key] = (buckets[key] ?? 0) + inv.collectedAmt;
+          ? date.year * 100 + date.month
+          : date.year * 10000 + date.month * 100 + date.day;
+      buckets[key] = (buckets[key] ?? 0) + collection.amount;
     }
 
     var running = 0.0;
@@ -123,6 +126,7 @@ class _DashboardMetrics {
 
   static List<DateTime> _trendPointsFor(
     List<Invoice> all,
+    List<InvoiceCollection> collections,
     _Period period,
     DateTime now,
   ) {
@@ -142,9 +146,15 @@ class _DashboardMetrics {
         if (all.isEmpty) {
           return List.generate(6, (i) => DateTime(now.year, now.month - 5 + i));
         }
-        var first = all.first.date;
-        for (final inv in all.skip(1)) {
-          if (inv.date.isBefore(first)) first = inv.date;
+        var first =
+            collections.isNotEmpty ? collections.first.date : all.first.date;
+        for (final collection in collections.skip(1)) {
+          if (collection.date.isBefore(first)) first = collection.date;
+        }
+        if (collections.isEmpty) {
+          for (final inv in all.skip(1)) {
+            if (inv.date.isBefore(first)) first = inv.date;
+          }
         }
         final firstMonth = DateTime(first.year, first.month);
         final monthCount = (now.year - firstMonth.year) * 12 +
@@ -170,6 +180,7 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   _Period _period = _Period.thisMonth;
   int? _selectedTrendIndex;
+  bool _openingInvoice = false;
   List<Invoice>? _metricsSource;
   _Period? _metricsPeriod;
   _DashboardMetrics? _metricsCache;
@@ -265,6 +276,7 @@ class _DashboardPageState extends State<DashboardPage> {
     if (data.isEmpty || width <= 0) return;
     final pct = (dx / width).clamp(0.0, 1.0);
     final index = (pct * (data.length - 1)).round().clamp(0, data.length - 1);
+    if (index == _selectedTrendIndex) return;
     setState(() => _selectedTrendIndex = index);
   }
 
@@ -382,23 +394,25 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  void _quickInvoice() {
-    Store.i.create().then((inv) {
+  Future<void> _quickInvoice() async {
+    if (_openingInvoice) return;
+    _openingInvoice = true;
+    try {
+      final inv = await Store.i.create();
       if (!mounted) return;
-      Navigator.push(
+      final changed = await Navigator.push<bool>(
         context,
         slideRoute(
           CreatePage(
             invoice: inv,
-            onSaved: (v) async {
-              await Store.i.add(v);
-              if (!mounted) return;
-              _r();
-            },
+            onSaved: Store.i.add,
           ),
         ),
       );
-    });
+      if (changed == true && mounted) _r();
+    } finally {
+      _openingInvoice = false;
+    }
   }
 
   // ── % change indicator ───────────────────────────────────────
@@ -560,25 +574,26 @@ class _DashboardPageState extends State<DashboardPage> {
                           color: T.text(context),
                         ),
                       ),
-                      const Spacer(),
-                      // See all — spring tap
-                      SpringTap(
-                        onTap: _seeAll,
-                        scale: 0.90,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 4,
-                          ),
-                          child: Text(
-                            'See all',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: T.muted(context),
+                      if (recent.isNotEmpty) ...[
+                        const Spacer(),
+                        SpringTap(
+                          onTap: _seeAll,
+                          scale: 0.90,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 4,
+                            ),
+                            child: Text(
+                              'See all',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: T.muted(context),
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -598,12 +613,40 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _recentList(List<Invoice> recent) {
     if (recent.isEmpty) {
-      return EmptyState(
-        icon: Icons.receipt_long_outlined,
-        message: 'No invoices yet',
-        subtitle: 'Create one quick invoice to see it here.',
-        ctaLabel: 'Quick Invoice',
-        ctaOnTap: _quickInvoice,
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+        decoration: BoxDecoration(
+          color: T.card(context).withValues(alpha: T.dark(context) ? 0.72 : 1),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: T.border(context).withValues(alpha: 0.70),
+            width: 0.5,
+          ),
+          boxShadow: T.dark(context) ? const [] : T.softShadow(context),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'No invoices yet',
+              style: TextStyle(
+                color: T.text(context),
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Your recent invoices will appear here.',
+              style: TextStyle(
+                color: T.muted(context),
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
       );
     }
 
@@ -1045,7 +1088,7 @@ class _AccountDrawer extends StatelessWidget {
                   _MenuAction(
                       'Templates', Prefs.defaultTemplate.value, onTemplates),
                   _MenuAction('Appearance', theme, onAppearance),
-                  _MenuAction('Data', 'Export & restore', onData),
+                  _MenuAction('Files', 'Backup & export', onData),
                   _MenuAction('Preferences', 'Home & motion', onSettings),
                 ]),
                 const Spacer(),

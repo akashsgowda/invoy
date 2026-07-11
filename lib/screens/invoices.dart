@@ -11,7 +11,13 @@ enum _InvoiceSort { newest, dueSoon, amountHigh, client }
 class InvoicesPage extends StatefulWidget {
   final VoidCallback onRefresh;
   final int initialTab;
-  const InvoicesPage({super.key, required this.onRefresh, this.initialTab = 0});
+  final int navigationRequest;
+  const InvoicesPage({
+    super.key,
+    required this.onRefresh,
+    this.initialTab = 0,
+    this.navigationRequest = 0,
+  });
   @override
   State<InvoicesPage> createState() => _InvoicesPageState();
 }
@@ -20,6 +26,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
   late int _tab;
   _InvoiceSort _sort = _InvoiceSort.newest;
   bool _searching = false;
+  bool _openingInvoice = false;
   String _q = '';
   final _sc = TextEditingController();
   final _searchFocus = FocusNode();
@@ -36,7 +43,8 @@ class _InvoicesPageState extends State<InvoicesPage> {
   @override
   void didUpdateWidget(covariant InvoicesPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.initialTab != oldWidget.initialTab) {
+    if (widget.initialTab != oldWidget.initialTab ||
+        widget.navigationRequest != oldWidget.navigationRequest) {
       _tab = widget.initialTab.clamp(0, 3);
     }
   }
@@ -110,25 +118,25 @@ class _InvoicesPageState extends State<InvoicesPage> {
         if (mounted) _r();
       });
 
-  void _newInvoice() {
-    Store.i.create().then((inv) {
+  Future<void> _newInvoice() async {
+    if (_openingInvoice) return;
+    _openingInvoice = true;
+    try {
+      final inv = await Store.i.create();
       if (!mounted) return;
-      Navigator.push(
+      final changed = await Navigator.push<bool>(
         context,
         slideRoute(
           CreatePage(
             invoice: inv,
-            onSaved: (v) async {
-              await Store.i.add(v);
-              if (!mounted) return;
-              _r();
-            },
+            onSaved: Store.i.add,
           ),
         ),
-      ).then((_) {
-        if (mounted) _r();
-      });
-    });
+      );
+      if (changed == true && mounted) _r();
+    } finally {
+      _openingInvoice = false;
+    }
   }
 
   @override
@@ -173,16 +181,19 @@ class _InvoicesPageState extends State<InvoicesPage> {
   Widget _topRow() => Row(
         key: const ValueKey('title'),
         children: [
-          Text(
-            'Invoices',
-            style: TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w700,
-              color: T.text(context),
-              letterSpacing: 0,
+          Expanded(
+            child: Text(
+              'Invoices',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.w700,
+                color: T.text(context),
+                letterSpacing: 0,
+              ),
             ),
           ),
-          const Spacer(),
           _iconBtn(
             Icons.sort_rounded,
             _openSort,
@@ -205,7 +216,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
             child: AppSearchField(
               controller: _sc,
               focusNode: _searchFocus,
-              hint: 'Search invoices...',
+              hint: 'Search invoices',
               autofocus: true,
               onChanged: (v) => setState(() => _q = v),
               onClear: () => setState(() {
@@ -298,9 +309,8 @@ class _InvoicesPageState extends State<InvoicesPage> {
                 return Stack(
                   children: [
                     AnimatedPositioned(
-                      duration: Prefs.reduceMotion
-                          ? Duration.zero
-                          : const Duration(milliseconds: 220),
+                      duration:
+                          Prefs.reduceMotion ? Duration.zero : kSegmentDuration,
                       curve: kSmooth,
                       left: itemW * _tab,
                       top: 0,
@@ -337,7 +347,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
                               child: AnimatedDefaultTextStyle(
                                 duration: Prefs.reduceMotion
                                     ? Duration.zero
-                                    : const Duration(milliseconds: 180),
+                                    : kSegmentTextDuration,
                                 curve: kSmooth,
                                 style: TextStyle(
                                   color: active
@@ -419,14 +429,29 @@ class _InvoicesPageState extends State<InvoicesPage> {
   }
 
   Widget _emptyState(String title, String? subtitle, bool showCta) =>
-      EmptyState(
-        icon: Icons.receipt_long_outlined,
-        message: title,
-        subtitle: subtitle ??
-            (showCta ? 'Start with a quick invoice.' : 'Nothing to show here.'),
-        ctaLabel: showCta ? 'Create Invoice' : null,
-        ctaOnTap: showCta ? _newInvoice : null,
-      );
+      Builder(builder: (context) {
+        final hasInvoices = Store.i.all.isNotEmpty;
+        final canCreate = showCta && !hasInvoices;
+        final canViewAll = hasInvoices && !_searching && _tab != 0;
+        return EmptyState(
+          icon: Icons.receipt_long_outlined,
+          message: title,
+          subtitle: subtitle ??
+              (canCreate
+                  ? 'Start with a quick invoice.'
+                  : 'Nothing to show here.'),
+          ctaLabel: canCreate
+              ? 'Create Invoice'
+              : canViewAll
+                  ? 'View All Invoices'
+                  : null,
+          ctaOnTap: canCreate
+              ? _newInvoice
+              : canViewAll
+                  ? () => setState(() => _tab = 0)
+                  : null,
+        );
+      });
 }
 
 // ── Invoice row ───────────────────────────────────────────────────
@@ -455,7 +480,10 @@ class _InvRow extends StatelessWidget {
         }
         return 'Paid';
       case Status.overdue:
-        final d = DateTime.now().difference(inv.due).inDays;
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+        final dueDay = DateTime(inv.due.year, inv.due.month, inv.due.day);
+        final d = today.difference(dueDay).inDays;
         return 'Overdue by $d day${d == 1 ? '' : 's'}';
       case Status.draft:
         return 'Draft';

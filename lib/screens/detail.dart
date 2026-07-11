@@ -80,7 +80,7 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Future<void> _dup() async {
-    final newNum = await DB.nextNum();
+    final newNum = await DB.nextNum(DateTime.now());
     final d = _inv.duplicate(uid(), newNum);
     await Store.i.add(d);
     if (!mounted) return;
@@ -380,7 +380,8 @@ class _DetailPageState extends State<DetailPage> {
             ),
             onSelected: (v) async {
               if (v == 'edit') {
-                await Navigator.push(
+                Invoice? saved;
+                final changed = await Navigator.push<bool>(
                   context,
                   slideRoute(
                     CreatePage(
@@ -388,14 +389,16 @@ class _DetailPageState extends State<DetailPage> {
                       editing: true,
                       onSaved: (inv) async {
                         await Store.i.update(inv);
-                        if (!mounted) return;
-                        setState(() => _inv = inv);
-                        _r();
+                        saved = inv;
                       },
                     ),
                   ),
                 );
                 if (!mounted) return;
+                if (changed == true && saved != null) {
+                  _inv = saved!;
+                  _r();
+                }
               }
               if (v == 'dup') await _dup();
               if (v == 'remind') await _shareReminder();

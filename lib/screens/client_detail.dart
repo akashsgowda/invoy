@@ -25,6 +25,7 @@ class ClientDetailPage extends StatefulWidget {
 
 class _ClientDetailPageState extends State<ClientDetailPage> {
   late Customer _client;
+  bool _openingInvoice = false;
 
   @override
   void initState() {
@@ -66,25 +67,29 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
   Color get _avatarColor =>
       C.avatarColors[_client.name.hashCode.abs() % C.avatarColors.length];
 
-  void _newInvoice() {
-    Store.i.create().then((inv) {
+  Future<void> _newInvoice() async {
+    if (_openingInvoice) return;
+    _openingInvoice = true;
+    try {
+      final inv = await Store.i.create();
       inv.client = _client.copy();
       if (!mounted) return;
-      Navigator.push(
+      final changed = await Navigator.push<bool>(
         context,
         slideRoute(
           CreatePage(
             invoice: inv,
-            onSaved: (v) async {
-              await Store.i.add(v);
-              if (!mounted) return;
-              setState(() {});
-              widget.onRefresh();
-            },
+            onSaved: Store.i.add,
           ),
         ),
       );
-    });
+      if (changed == true && mounted) {
+        setState(() {});
+        widget.onRefresh();
+      }
+    } finally {
+      _openingInvoice = false;
+    }
   }
 
   Future<void> _editClient() async {
@@ -103,13 +108,17 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
   }
 
   Future<void> _deleteClient() async {
+    if (_invoices.isNotEmpty) {
+      showAppSnack(context, 'Clients with invoice history cannot be deleted');
+      return;
+    }
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: T.card(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
-          'Remove saved client?',
+          'Delete client?',
           style: TextStyle(
             color: T.text(context),
             fontWeight: FontWeight.w700,
@@ -117,7 +126,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
           ),
         ),
         content: Text(
-          'This removes the saved client profile. Existing invoices stay as they are.',
+          'This permanently removes this saved client.',
           style: TextStyle(color: T.muted(context), fontSize: 13),
         ),
         actions: [
@@ -128,7 +137,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
-              'Remove',
+              'Delete',
               style: TextStyle(color: C.overdue, fontWeight: FontWeight.w700),
             ),
           ),
@@ -141,7 +150,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     if (!mounted) return;
     widget.onRefresh();
     final messenger = ScaffoldMessenger.of(context);
-    final snack = appSnackBar(context, 'Saved client removed');
+    final snack = appSnackBar(context, 'Client deleted');
     Navigator.pop(context);
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(snack);
@@ -205,19 +214,20 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                   ],
                 ),
               ),
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete_outline, size: 16, color: C.overdue),
-                    SizedBox(width: 10),
-                    Text(
-                      'Remove profile',
-                      style: TextStyle(fontSize: 14, color: C.overdue),
-                    ),
-                  ],
+              if (_invoices.isEmpty)
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_outline, size: 16, color: C.overdue),
+                      SizedBox(width: 10),
+                      Text(
+                        'Delete client',
+                        style: TextStyle(fontSize: 14, color: C.overdue),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
             ],
           ),
           const SizedBox(width: 4),
@@ -460,18 +470,27 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
           children: [
             Row(
               children: [
-                Text(
-                  'Statement',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: T.text(context),
+                Expanded(
+                  child: Text(
+                    'Statement',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: T.text(context),
+                    ),
                   ),
                 ),
-                const Spacer(),
-                Text(
-                  '${_invoices.length} invoice${_invoices.length == 1 ? '' : 's'}',
-                  style: TextStyle(fontSize: 12, color: T.muted(context)),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    '${_invoices.length} invoice${_invoices.length == 1 ? '' : 's'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(fontSize: 12, color: T.muted(context)),
+                  ),
                 ),
               ],
             ),

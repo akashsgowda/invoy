@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 const kSpring = Cubic(0.22, 1.0, 0.36, 1.0);
 const kSmooth = Curves.easeOutCubic;
 const kPop = Curves.easeOutBack;
+const kSegmentDuration = Duration(milliseconds: 220);
+const kSegmentTextDuration = Duration(milliseconds: 180);
 
 // ─── Color Tokens ────────────────────────────────────────────────
 
