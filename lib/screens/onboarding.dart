@@ -19,7 +19,6 @@ class OnboardScreen extends StatefulWidget {
 }
 
 class _OnboardScreenState extends State<OnboardScreen> {
-  final _pageCtrl = PageController();
   final _nameC = TextEditingController();
   final _bizC = TextEditingController();
   final _bizAddressC = TextEditingController();
@@ -27,14 +26,14 @@ class _OnboardScreenState extends State<OnboardScreen> {
   final _gstC = TextEditingController();
   final _upiC = TextEditingController();
   int _page = 0;
-  bool _loading = false;
+  int _direction = 1;
   bool _showUpiQr = true;
   String _upiQrData = '';
   String _upiQrName = '';
+  bool _finishing = false;
 
   @override
   void dispose() {
-    _pageCtrl.dispose();
     _nameC.dispose();
     _bizC.dispose();
     _bizAddressC.dispose();
@@ -45,12 +44,11 @@ class _OnboardScreenState extends State<OnboardScreen> {
   }
 
   void _toPage(int p) {
-    setState(() => _page = p);
-    _pageCtrl.animateToPage(
-      p,
-      duration: const Duration(milliseconds: 340),
-      curve: kSpring,
-    );
+    if (p == _page) return;
+    setState(() {
+      _direction = p > _page ? 1 : -1;
+      _page = p;
+    });
   }
 
   void _next() {
@@ -60,10 +58,35 @@ class _OnboardScreenState extends State<OnboardScreen> {
       showAppSnack(context, 'Enter your name to continue');
       return;
     }
+    if (_page == 2 && !isValidGstin(_gstC.text)) {
+      if (Prefs.haptics) HapticFeedback.mediumImpact();
+      showAppSnack(context, 'Enter a valid 15-character GSTIN');
+      return;
+    }
+    if (_page == 2 && _gstC.text.trim().isNotEmpty) {
+      if (_bizAddressC.text.trim().isEmpty) {
+        showAppSnack(context, 'Add the registered business address');
+        return;
+      }
+      if (gstStateCode(_bizStateC.text) == null) {
+        showAppSnack(context, 'Enter a valid Indian business state');
+        return;
+      }
+      if (!gstinMatchesState(_gstC.text, _bizStateC.text)) {
+        showAppSnack(context, 'GSTIN does not match the business state');
+        return;
+      }
+    }
+    if (_page == 2 && !isValidUpiId(_upiC.text)) {
+      if (Prefs.haptics) HapticFeedback.mediumImpact();
+      showAppSnack(context, 'Enter a valid UPI ID, like name@bank');
+      return;
+    }
     if (_page < 3) _toPage(_page + 1);
   }
 
   void _back() {
+    if (_finishing) return;
     if (_page > 0) _toPage(_page - 1);
   }
 
@@ -104,13 +127,19 @@ class _OnboardScreenState extends State<OnboardScreen> {
   }
 
   Future<void> _finish() async {
-    if (_loading) return;
+    if (_finishing) return;
     if (!isValidGstin(_gstC.text)) {
       if (Prefs.haptics) HapticFeedback.mediumImpact();
       showAppSnack(context, 'Enter a valid 15-character GSTIN');
       return;
     }
-    setState(() => _loading = true);
+    if (!isValidUpiId(_upiC.text)) {
+      if (Prefs.haptics) HapticFeedback.mediumImpact();
+      showAppSnack(context, 'Enter a valid UPI ID, like name@bank');
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() => _finishing = true);
     try {
       await Prefs.update('bizAddress', _bizAddressC.text.trim());
       await Prefs.update('bizState', _bizStateC.text.trim());
@@ -118,53 +147,84 @@ class _OnboardScreenState extends State<OnboardScreen> {
       if (_upiQrData.isNotEmpty) {
         await Prefs.setUpiQrImage(_upiQrData, _upiQrName);
       }
-      await Prefs.setOnboarded(
-        _nameC.text.trim(),
-        _bizC.text.trim(),
-        cleanGstin(_gstC.text),
-        _upiC.text.trim(),
-      );
+      await Prefs.update('yourName', _nameC.text.trim());
+      await Prefs.update('bizName', _bizC.text.trim());
+      await Prefs.update('gstNum', cleanGstin(_gstC.text));
+      await Prefs.update('upiId', _upiC.text.trim());
+      await Prefs.update('onboarded', '1');
+      if (!mounted) return;
+      if (Prefs.haptics) HapticFeedback.lightImpact();
+      Prefs.onboarded.value = true;
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() => _finishing = false);
       showAppSnack(context, 'Could not finish setup');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final page = switch (_page) {
+      0 => _WelcomePage(key: const ValueKey('welcome'), onStart: _next),
+      1 => _DetailsPage(
+          key: const ValueKey('details'),
+          nameC: _nameC,
+          bizC: _bizC,
+          progressFrom: _direction < 0 ? 1 : 0,
+          onBack: _back,
+          onNext: _next,
+        ),
+      2 => _BusinessPage(
+          key: const ValueKey('business'),
+          bizAddressC: _bizAddressC,
+          bizStateC: _bizStateC,
+          gstC: _gstC,
+          upiC: _upiC,
+          qrName: _upiQrName,
+          showUpiQr: _showUpiQr,
+          progressFrom: 0.5,
+          onShowUpiQr: (v) => setState(() => _showUpiQr = v),
+          onPickQr: _pickUpiQrImage,
+          onRemoveQr: _removeUpiQrImage,
+          onBack: _back,
+          onNext: _next,
+        ),
+      _ => _CompletePage(
+          key: const ValueKey('complete'),
+          loading: _finishing,
+          onFinish: _finish,
+        ),
+    };
+
     return Scaffold(
       backgroundColor: T.bg(context),
-      // Dismiss keyboard on tap outside
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
         child: SafeArea(
-          child: PageView(
-            controller: _pageCtrl,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              _WelcomePage(onStart: _next),
-              _DetailsPage(
-                nameC: _nameC,
-                bizC: _bizC,
-                onBack: _back,
-                onNext: _next,
-              ),
-              _BusinessPage(
-                bizAddressC: _bizAddressC,
-                bizStateC: _bizStateC,
-                gstC: _gstC,
-                upiC: _upiC,
-                qrName: _upiQrName,
-                showUpiQr: _showUpiQr,
-                onShowUpiQr: (v) => setState(() => _showUpiQr = v),
-                onPickQr: _pickUpiQrImage,
-                onRemoveQr: _removeUpiQrImage,
-                onBack: _back,
-                onNext: _next,
-              ),
-              _CompletePage(loading: _loading, onFinish: _finish),
-            ],
+          child: AnimatedSwitcher(
+            duration: Prefs.reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 320),
+            reverseDuration: Prefs.reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 240),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) {
+              final curved = CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
+              );
+              final slide = Tween<Offset>(
+                begin: Offset(0.035 * _direction, 0),
+                end: Offset.zero,
+              ).animate(curved);
+              return FadeTransition(
+                opacity: curved,
+                child: SlideTransition(position: slide, child: child),
+              );
+            },
+            child: page,
           ),
         ),
       ),
@@ -178,7 +238,7 @@ class _OnboardScreenState extends State<OnboardScreen> {
 
 class _WelcomePage extends StatefulWidget {
   final VoidCallback onStart;
-  const _WelcomePage({required this.onStart});
+  const _WelcomePage({super.key, required this.onStart});
   @override
   State<_WelcomePage> createState() => _WelcomePageState();
 }
@@ -216,112 +276,57 @@ class _WelcomePageState extends State<_WelcomePage>
           animation: _slide,
           builder: (_, child) => Transform.translate(
               offset: Offset(0, _slide.value), child: child),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(28, 0, 28, 40),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          child: _CenteredOnboardLayout(
+            bottom: Column(
               children: [
-                const Spacer(flex: 3),
+                _PrimaryBtn('Get started', widget.onStart),
+                const SizedBox(height: 10),
+                Text(
+                  'Takes less than a minute.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: T.faint(context)),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Text(
                   'Invoy',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: T.muted(context),
-                    letterSpacing: 0,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  'Set up your invoice workspace.',
-                  style: TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
                     color: T.text(context),
                     letterSpacing: 0,
-                    height: 1.08,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Add your business details once. They will appear on invoices and PDFs.',
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: T.muted(context),
-                    height: 1.5,
                   ),
                 ),
                 const SizedBox(height: 28),
-                _SetupPreview(),
-                const Spacer(flex: 3),
-                _PrimaryBtn('Get started', widget.onStart),
-                const SizedBox(height: 16),
-                Center(
-                  child: Text(
-                    'Quick setup. You can edit these later.',
-                    style: TextStyle(fontSize: 12, color: T.faint(context)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-}
-
-class _SetupPreview extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: T.card(context),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: T.border(context), width: 0.5),
-        ),
-        child: Column(
-          children: [
-            _previewRow(context, 'Profile', 'Name and business'),
-            Divider(height: 24, color: T.divider(context)),
-            _previewRow(context, 'Tax', 'GST details if needed'),
-            Divider(height: 24, color: T.divider(context)),
-            _previewRow(context, 'Payment', 'UPI ID and QR for PDFs'),
-          ],
-        ),
-      );
-
-  Widget _previewRow(BuildContext context, String title, String subtitle) =>
-      Row(
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: T.text(context),
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
                 Text(
-                  title,
+                  'Set up once.\nInvoice faster.',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
+                    fontSize: 36,
+                    fontWeight: FontWeight.w800,
                     color: T.text(context),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0,
+                    height: 1.06,
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 16),
                 Text(
-                  subtitle,
-                  style: TextStyle(color: T.muted(context), fontSize: 12),
+                  'Add your business details now. You can update them anytime.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: T.muted(context),
+                    height: 1.45,
+                  ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
       );
 }
 
@@ -331,50 +336,62 @@ class _SetupPreview extends StatelessWidget {
 
 class _DetailsPage extends StatelessWidget {
   final TextEditingController nameC, bizC;
+  final double progressFrom;
   final VoidCallback onBack, onNext;
   const _DetailsPage({
+    super.key,
     required this.nameC,
     required this.bizC,
+    required this.progressFrom,
     required this.onBack,
     required this.onNext,
   });
 
   @override
-  Widget build(BuildContext context) => _PageShell(
+  Widget build(BuildContext context) => _StepLayout(
         step: '1 of 2',
+        progressFrom: progressFrom,
+        progress: 0.5,
         onBack: onBack,
-        cta: _PrimaryBtn('Continue', onNext),
+        bottom: _PrimaryBtn('Continue', onNext),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               'Your details',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 28,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w800,
                 color: T.text(context),
                 letterSpacing: 0,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(
               'These details appear on invoices and PDF files.',
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: T.muted(context)),
             ),
-            const SizedBox(height: 28),
-            _OnboardField(
-              ctrl: nameC,
-              label: 'Your name',
-              hint: 'Enter your full name',
-              autofocus: true,
+            const SizedBox(height: 26),
+            _OnboardPanel(
+              child: Column(
+                children: [
+                  _OnboardField(
+                    ctrl: nameC,
+                    label: 'Your name',
+                    hint: 'Enter your full name',
+                  ),
+                  const SizedBox(height: 16),
+                  _OnboardField(
+                    ctrl: bizC,
+                    label: 'Business name',
+                    hint: 'Enter business name',
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
-            _OnboardField(
-              ctrl: bizC,
-              label: 'Business name',
-              hint: 'Enter business name',
-            ),
-            const SizedBox(height: 14),
             const _SmallNote(
                 'Your name is required. Business name is optional.'),
           ],
@@ -390,16 +407,19 @@ class _BusinessPage extends StatelessWidget {
   final TextEditingController bizAddressC, bizStateC, gstC, upiC;
   final String qrName;
   final bool showUpiQr;
+  final double progressFrom;
   final ValueChanged<bool> onShowUpiQr;
   final VoidCallback onPickQr, onRemoveQr;
   final VoidCallback onBack, onNext;
   const _BusinessPage({
+    super.key,
     required this.bizAddressC,
     required this.bizStateC,
     required this.gstC,
     required this.upiC,
     required this.qrName,
     required this.showUpiQr,
+    required this.progressFrom,
     required this.onShowUpiQr,
     required this.onPickQr,
     required this.onRemoveQr,
@@ -408,63 +428,67 @@ class _BusinessPage extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => _PageShell(
+  Widget build(BuildContext context) => _StepLayout(
         step: '2 of 2',
+        progressFrom: progressFrom,
+        progress: 1,
         onBack: onBack,
-        cta: Column(
-          children: [
-            _PrimaryBtn('Continue', onNext),
-            const SizedBox(height: 12),
-            _GhostBtn('Skip for now', onNext),
-          ],
-        ),
+        bottom: _PrimaryBtn('Continue', onNext),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               'Tax and payment',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 28,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w800,
                 color: T.text(context),
                 letterSpacing: 0,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(
               'Optional details for GST invoices and faster payment.',
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: T.muted(context)),
             ),
-            const SizedBox(height: 28),
-            _OnboardField(
-              ctrl: bizAddressC,
-              label: 'Business address',
-              hint: 'Street, city, pincode',
-              kb: TextInputType.streetAddress,
-            ),
-            const SizedBox(height: 16),
-            _OnboardField(
-              ctrl: bizStateC,
-              label: 'Business state',
-              hint: 'Karnataka',
-              kb: TextInputType.text,
-              caps: TextCapitalization.words,
-            ),
-            const SizedBox(height: 16),
-            _OnboardField(
-              ctrl: gstC,
-              label: 'GSTIN',
-              hint: '29ABCDE1234F1Z5',
-              kb: TextInputType.text,
-              caps: TextCapitalization.characters,
-              inputFormatters: gstinInputFormatters,
-            ),
-            const SizedBox(height: 16),
-            _OnboardField(
-              ctrl: upiC,
-              label: 'UPI ID',
-              hint: 'yourname@upi',
-              kb: TextInputType.emailAddress,
+            const SizedBox(height: 22),
+            _OnboardPanel(
+              child: Column(
+                children: [
+                  _OnboardField(
+                    ctrl: bizAddressC,
+                    label: 'Business address',
+                    hint: 'Street, city, pincode',
+                    kb: TextInputType.streetAddress,
+                  ),
+                  const SizedBox(height: 14),
+                  _OnboardField(
+                    ctrl: bizStateC,
+                    label: 'Business state',
+                    hint: 'Karnataka',
+                    kb: TextInputType.text,
+                    caps: TextCapitalization.words,
+                  ),
+                  const SizedBox(height: 14),
+                  _OnboardField(
+                    ctrl: gstC,
+                    label: 'GSTIN',
+                    hint: '29ABCDE1234F1Z5',
+                    kb: TextInputType.text,
+                    caps: TextCapitalization.characters,
+                    inputFormatters: gstinInputFormatters,
+                  ),
+                  const SizedBox(height: 14),
+                  _OnboardField(
+                    ctrl: upiC,
+                    label: 'UPI ID',
+                    hint: 'yourname@upi',
+                    kb: TextInputType.emailAddress,
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             _QrSetupCard(
@@ -525,9 +549,18 @@ class _QrSetupCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        hasQr ? 'Using uploaded QR image' : 'Uses UPI ID',
-                        style: TextStyle(color: T.muted(context), fontSize: 12),
+                      AnimatedSwitcher(
+                        duration: Prefs.reduceMotion
+                            ? Duration.zero
+                            : const Duration(milliseconds: 180),
+                        child: Text(
+                          hasQr
+                              ? 'Payment QR only, not an IRP e-invoice QR'
+                              : 'Generated from your UPI ID for payment',
+                          key: ValueKey(hasQr),
+                          style:
+                              TextStyle(color: T.muted(context), fontSize: 12),
+                        ),
                       ),
                     ],
                   ),
@@ -576,12 +609,18 @@ class _QrSetupCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Text(
-                    hasQr ? 'Remove' : 'Choose',
-                    style: TextStyle(
-                      color: T.text(context),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
+                  AnimatedSwitcher(
+                    duration: Prefs.reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 180),
+                    child: Text(
+                      hasQr ? 'Remove' : 'Choose',
+                      key: ValueKey('qr-action-$hasQr'),
+                      style: TextStyle(
+                        color: T.text(context),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -594,41 +633,46 @@ class _QrSetupCard extends StatelessWidget {
   }
 }
 
-// ════════════════════════════════════════════════════════════════
-// PAGE 4 — COMPLETE
-// ════════════════════════════════════════════════════════════════
-
+// Version-one completion moment, kept intentionally simple.
 class _CompletePage extends StatefulWidget {
   final bool loading;
   final VoidCallback onFinish;
-  const _CompletePage({required this.loading, required this.onFinish});
+
+  const _CompletePage({
+    super.key,
+    required this.loading,
+    required this.onFinish,
+  });
+
   @override
   State<_CompletePage> createState() => _CompletePageState();
 }
 
 class _CompletePageState extends State<_CompletePage>
     with SingleTickerProviderStateMixin {
-  late AnimationController _ac;
-  late Animation<double> _scale;
-  late Animation<double> _fade;
+  late final AnimationController _controller;
+  late final Animation<double> _scale;
+  late final Animation<double> _fade;
 
   @override
   void initState() {
     super.initState();
-    _ac = AnimationController(
+    _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: Prefs.reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 600),
     )..forward();
-    _scale = Tween(
-      begin: 0.7,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _ac, curve: kSpring));
-    _fade = CurvedAnimation(parent: _ac, curve: kSpring);
+    _scale = Tween<double>(
+      begin: Prefs.reduceMotion ? 1 : 0.7,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _controller, curve: kSpring));
+    _fade = CurvedAnimation(parent: _controller, curve: kSpring);
   }
 
   @override
   void dispose() {
-    _ac.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
@@ -643,8 +687,6 @@ class _CompletePageState extends State<_CompletePage>
             child: Column(
               children: [
                 const Spacer(flex: 2),
-
-                // Check mark
                 Container(
                   width: 64,
                   height: 64,
@@ -660,8 +702,6 @@ class _CompletePageState extends State<_CompletePage>
                   ),
                 ),
                 const SizedBox(height: 28),
-
-                // Name greeting
                 Text(
                   'Setup complete.',
                   style: TextStyle(
@@ -681,17 +721,18 @@ class _CompletePageState extends State<_CompletePage>
                     height: 1.5,
                   ),
                 ),
-
                 const Spacer(flex: 3),
-
                 widget.loading
-                    ? const SizedBox(
+                    ? SizedBox(
                         height: 54,
                         child: Center(
                           child: SizedBox(
                             width: 22,
                             height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 1.5),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: T.text(context),
+                            ),
                           ),
                         ),
                       )
@@ -703,76 +744,244 @@ class _CompletePageState extends State<_CompletePage>
       );
 }
 
-// ════════════════════════════════════════════════════════════════
-// SHARED PAGE SHELL
-// ════════════════════════════════════════════════════════════════
-
-class _PageShell extends StatelessWidget {
-  final String step;
-  final VoidCallback onBack;
+class _CenteredOnboardLayout extends StatelessWidget {
   final Widget child;
-  final Widget cta;
+  final Widget bottom;
 
-  const _PageShell({
-    required this.step,
-    required this.onBack,
+  const _CenteredOnboardLayout({
     required this.child,
-    required this.cta,
+    required this.bottom,
   });
 
   @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          // Nav bar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 20, 0),
-            child: Row(
-              children: [
-                IconButton(
-                  tooltip: 'Back',
-                  onPressed: onBack,
-                  icon: Icon(
-                    Icons.arrow_back_rounded,
-                    size: 18,
-                    color: T.muted(context),
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) => Column(
+          children: [
+            Expanded(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(28, 20, 28, 20),
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 430),
+                    child: _FadeSlideIn(order: 0, dy: 18, child: child),
                   ),
                 ),
-                const Spacer(),
-                Text(
-                  step,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: T.faint(context),
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-
-          // Scrollable content
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(28, 24, 28, 0),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              child: child,
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                28,
+                12,
+                28,
+                MediaQuery.of(context).viewInsets.bottom > 0
+                    ? MediaQuery.of(context).viewInsets.bottom + 16
+                    : 32,
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: _FadeSlideIn(order: 3, dy: 10, child: bottom),
+              ),
             ),
-          ),
-
-          // CTA pinned at bottom
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              28,
-              16,
-              28,
-              MediaQuery.of(context).viewInsets.bottom > 0
-                  ? MediaQuery.of(context).viewInsets.bottom + 16
-                  : 32,
-            ),
-            child: cta,
-          ),
-        ],
+          ],
+        ),
       );
+}
+
+class _StepLayout extends StatelessWidget {
+  final String step;
+  final double progressFrom;
+  final double progress;
+  final VoidCallback onBack;
+  final Widget child;
+  final Widget bottom;
+
+  const _StepLayout({
+    required this.step,
+    required this.progressFrom,
+    required this.progress,
+    required this.onBack,
+    required this.child,
+    required this.bottom,
+  });
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 20, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Back',
+                    onPressed: onBack,
+                    icon: Icon(
+                      Icons.arrow_back_rounded,
+                      size: 18,
+                      color: T.muted(context),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    step,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: T.faint(context),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 12, 28, 0),
+              child: _ProgressLine(from: progressFrom, value: progress),
+            ),
+            Expanded(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(28, 18, 28, 18),
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 430),
+                    child: _FadeSlideIn(
+                      key: ValueKey('content-$step'),
+                      order: 0,
+                      dy: 18,
+                      child: child,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                28,
+                12,
+                28,
+                MediaQuery.of(context).viewInsets.bottom > 0
+                    ? MediaQuery.of(context).viewInsets.bottom + 16
+                    : 32,
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: _FadeSlideIn(
+                  key: ValueKey('cta-$step'),
+                  order: 2,
+                  dy: 10,
+                  child: bottom,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+class _OnboardPanel extends StatelessWidget {
+  final Widget child;
+  const _OnboardPanel({required this.child});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: T.card(context),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: T.border(context), width: 0.5),
+          boxShadow: T.dark(context) ? const [] : T.softShadow(context),
+        ),
+        child: child,
+      );
+}
+
+class _ProgressLine extends StatelessWidget {
+  final double from;
+  final double value;
+  const _ProgressLine({required this.from, required this.value});
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        label: 'Setup progress',
+        value: '${(value.clamp(0, 1) * 100).round()} percent',
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(
+            begin: from.clamp(0, 1).toDouble(),
+            end: value.clamp(0, 1).toDouble(),
+          ),
+          duration: Prefs.reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 440),
+          curve: Curves.easeOutCubic,
+          builder: (context, animatedValue, _) => ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: SizedBox(
+              height: 4,
+              child: LayoutBuilder(
+                builder: (context, constraints) => Stack(
+                  children: [
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(color: T.border(context)),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: SizedBox(
+                        key: const ValueKey('onboarding-progress-fill'),
+                        width: constraints.maxWidth * animatedValue,
+                        height: 4,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(color: T.text(context)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+}
+
+class _FadeSlideIn extends StatelessWidget {
+  final Widget child;
+  final int order;
+  final double dy;
+
+  const _FadeSlideIn({
+    super.key,
+    required this.child,
+    this.order = 0,
+    this.dy = 16,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (Prefs.reduceMotion) return child;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 430 + order * 70),
+      curve: kSmooth,
+      child: child,
+      builder: (context, value, child) {
+        final start = (order * 0.14).clamp(0.0, 0.7);
+        final eased = ((value - start) / (1 - start)).clamp(0.0, 1.0);
+        return Opacity(
+          opacity: eased,
+          child: Transform.translate(
+            offset: Offset(0, (1 - eased) * dy),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -785,7 +994,6 @@ class _OnboardField extends StatefulWidget {
   final TextInputType kb;
   final TextCapitalization caps;
   final List<TextInputFormatter>? inputFormatters;
-  final bool autofocus;
 
   const _OnboardField({
     required this.ctrl,
@@ -794,7 +1002,6 @@ class _OnboardField extends StatefulWidget {
     this.kb = TextInputType.text,
     this.caps = TextCapitalization.words,
     this.inputFormatters,
-    this.autofocus = false,
   });
 
   @override
@@ -854,7 +1061,6 @@ class _OnboardFieldState extends State<_OnboardField> {
                 child: TextField(
                   focusNode: _focus,
                   controller: widget.ctrl,
-                  autofocus: widget.autofocus,
                   keyboardType: widget.kb,
                   textCapitalization: widget.caps,
                   inputFormatters: widget.inputFormatters,
@@ -899,18 +1105,4 @@ class _PrimaryBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AppButton(label: label, onTap: onTap);
-}
-
-class _GhostBtn extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _GhostBtn(this.label, this.onTap);
-
-  @override
-  Widget build(BuildContext context) => AppButton(
-        label: label,
-        onTap: onTap,
-        tone: AppButtonTone.ghost,
-        height: 44,
-      );
 }
