@@ -5,8 +5,8 @@ small businesses and freelancers create invoices, track payment status, manage
 clients, export backups, and generate shareable invoice PDFs.
 
 <p align="center">
-  <a href="https://github.com/akashsgowda/invoy/releases/latest/download/Invoy-v2.0.0.apk">
-    <img src="https://img.shields.io/badge/Download%20APK-Invoy%20v2.0.0-black?style=for-the-badge&logo=android" alt="Download Invoy APK">
+  <a href="https://github.com/akashsgowda/invoy/releases/latest/download/Invoy-v2.1.1.apk">
+    <img src="https://img.shields.io/badge/Download%20APK-Invoy%20v2.1.1-black?style=for-the-badge&logo=android" alt="Download Invoy APK">
   </a>
 </p>
 
@@ -14,7 +14,7 @@ clients, export backups, and generate shareable invoice PDFs.
   <b>Download the latest Android APK from GitHub Releases.</b>
 </p>
 
-**Download:** https://github.com/akashsgowda/invoy/releases/latest/download/Invoy-v2.0.0.apk
+**Download:** https://github.com/akashsgowda/invoy/releases/latest/download/Invoy-v2.1.1.apk
 
 ## Screenshots
 
@@ -38,7 +38,8 @@ control.
 - Generate invoice PDFs and receipt PDFs for sharing or saving outside the app.
 - Export GST summary CSV files and restore app data using local backups.
 - Store clients and business profile details locally on the device.
-- Optional UPI payment QR support for unpaid invoices.
+- Optional UPI payment QR support for unpaid invoices. This is a payment QR,
+  not an IRP e-invoice QR; Invoy does not generate an IRN.
 
 ## Development
 
