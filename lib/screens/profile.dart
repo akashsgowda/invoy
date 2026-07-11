@@ -16,6 +16,7 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   bool _editing = false;
+  bool _saving = false;
   late final TextEditingController _nameC;
   late final TextEditingController _bizC;
   late final TextEditingController _bizAddressC;
@@ -49,23 +50,51 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!isValidGstin(_gstC.text)) {
       if (Prefs.haptics) HapticFeedback.mediumImpact();
       showAppSnack(context, 'Enter a valid 15-character GSTIN');
       return;
     }
-    await Prefs.update('yourName', _nameC.text.trim());
-    await Prefs.update('bizName', _bizC.text.trim());
-    await Prefs.update('bizAddress', _bizAddressC.text.trim());
-    await Prefs.update('bizState', _bizStateC.text.trim());
-    await Prefs.update('gstNum', cleanGstin(_gstC.text));
-    await Prefs.update('upiId', _upiC.text.trim());
-    await Prefs.update(
-      'invPrefix',
-      _prefixC.text.trim().isEmpty ? 'INV' : _prefixC.text.trim().toUpperCase(),
-    );
-    if (!mounted) return;
-    setState(() => _editing = false);
+    if (!isValidUpiId(_upiC.text)) {
+      if (Prefs.haptics) HapticFeedback.mediumImpact();
+      showAppSnack(context, 'Enter a valid UPI ID, like name@bank');
+      return;
+    }
+    if (_gstC.text.trim().isNotEmpty) {
+      if (_bizAddressC.text.trim().isEmpty) {
+        showAppSnack(context, 'Add the registered business address');
+        return;
+      }
+      if (gstStateCode(_bizStateC.text) == null) {
+        showAppSnack(context, 'Enter a valid Indian business state');
+        return;
+      }
+      if (!gstinMatchesState(_gstC.text, _bizStateC.text)) {
+        showAppSnack(context, 'GSTIN does not match the business state');
+        return;
+      }
+    }
+    setState(() => _saving = true);
+    try {
+      final prefix = sanitizeInvoicePrefix(_prefixC.text);
+      await Prefs.update('yourName', _nameC.text.trim());
+      await Prefs.update('bizName', _bizC.text.trim());
+      await Prefs.update('bizAddress', _bizAddressC.text.trim());
+      await Prefs.update('bizState', _bizStateC.text.trim());
+      await Prefs.update('gstNum', cleanGstin(_gstC.text));
+      await Prefs.update('upiId', _upiC.text.trim());
+      await Prefs.update('invPrefix', prefix);
+      if (!mounted) return;
+      _prefixC.text = prefix;
+      setState(() => _editing = false);
+      showAppSnack(context, 'Business details saved');
+    } catch (_) {
+      if (!mounted) return;
+      showAppSnack(context, 'Could not save business details');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   void _cancelEdit() {
@@ -85,6 +114,9 @@ class _ProfilePageState extends State<ProfilePage> {
     if (Prefs.upiId.value.isNotEmpty) return 'Auto';
     return 'Not set';
   }
+
+  String get _signatureStatus =>
+      Prefs.signatureImage.value.isEmpty ? 'Not set' : 'Image set';
 
   Future<void> _pickUpiQrImage() async {
     final result = await FilePicker.pickFiles(
@@ -119,6 +151,34 @@ class _ProfilePageState extends State<ProfilePage> {
     if (!mounted) return;
     setState(() {});
     showAppSnack(context, 'UPI QR removed');
+  }
+
+  Future<void> _pickSignatureImage() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    final bytes = file.bytes ??
+        (file.path == null ? null : await File(file.path!).readAsBytes());
+    if (bytes == null || bytes.isEmpty || bytes.length > 2 * 1024 * 1024) {
+      if (!mounted) return;
+      showAppSnack(context, 'Choose a signature image under 2 MB');
+      return;
+    }
+    await Prefs.setSignatureImage(base64Encode(bytes), file.name);
+    if (!mounted) return;
+    setState(() {});
+    showAppSnack(context, 'Invoice signature saved');
+  }
+
+  Future<void> _removeSignatureImage() async {
+    await Prefs.setSignatureImage('', '');
+    if (!mounted) return;
+    setState(() {});
+    showAppSnack(context, 'Invoice signature removed');
   }
 
   Future<void> _copyValue(String label, String value) async {
@@ -180,6 +240,84 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       ),
     );
+  }
+
+  void _openSignatureSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => AppSheet(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Invoice signature',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: T.text(context),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Used as the authorised signature on invoice PDFs.',
+              style: TextStyle(fontSize: 12, color: T.muted(context)),
+            ),
+            if (Prefs.signatureImage.value.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _signaturePreview(),
+            ],
+            const SizedBox(height: 14),
+            _sheetAction(
+              icon: Icons.draw_outlined,
+              title: Prefs.signatureImage.value.isEmpty
+                  ? 'Choose signature image'
+                  : 'Change signature image',
+              subtitle: 'PNG, JPG or WebP under 2 MB',
+              onTap: () {
+                Navigator.pop(context);
+                _pickSignatureImage();
+              },
+            ),
+            if (Prefs.signatureImage.value.isNotEmpty) ...[
+              Divider(height: 1, color: T.divider(context)),
+              _sheetAction(
+                icon: Icons.close_rounded,
+                title: 'Remove signature image',
+                subtitle: 'Remove it from future PDFs',
+                onTap: () {
+                  Navigator.pop(context);
+                  _removeSignatureImage();
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _signaturePreview() {
+    try {
+      final bytes = base64Decode(Prefs.signatureImage.value);
+      return Container(
+        width: double.infinity,
+        height: 92,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: T.border(context), width: 0.5),
+        ),
+        child: Image.memory(bytes, fit: BoxFit.contain),
+      );
+    } catch (_) {
+      return Text(
+        'Signature image could not be previewed',
+        style: TextStyle(fontSize: 12, color: T.muted(context)),
+      );
+    }
   }
 
   @override
@@ -250,10 +388,15 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
             _field('UPI ID', _upiC, Prefs.upiId.value, hint: 'Not set'),
             _qrAction(),
+            _signatureAction(),
             _field(
               'Invoice prefix',
               _prefixC,
               Prefs.invPrefix.value,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp('[A-Za-z0-9]')),
+                LengthLimitingTextInputFormatter(kMaxInvoicePrefixLength),
+              ],
               last: true,
             ),
           ]),
@@ -276,7 +419,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     Expanded(
                       child: AppButton(
                         label: 'Cancel',
-                        onTap: _cancelEdit,
+                        onTap: _saving ? null : _cancelEdit,
                         tone: AppButtonTone.secondary,
                       ),
                     ),
@@ -285,7 +428,8 @@ class _ProfilePageState extends State<ProfilePage> {
                       flex: 2,
                       child: AppButton(
                         label: 'Save Changes',
-                        onTap: _save,
+                        onTap: _saving ? null : _save,
+                        loading: _saving,
                       ),
                     ),
                   ],
@@ -541,6 +685,51 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  Widget _signatureAction() => Column(
+        children: [
+          SpringTap(
+            onTap: _openSignatureSheet,
+            scale: 0.985,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      'Invoice signature',
+                      style: TextStyle(fontSize: 14, color: T.muted(context)),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      _signatureStatus,
+                      textAlign: TextAlign.end,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _signatureStatus == 'Not set'
+                            ? T.faint(context)
+                            : T.text(context),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: T.faint(context),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Divider(height: 1, indent: 20, color: T.divider(context)),
+        ],
+      );
+
   Widget _qrToggleRow(StateSetter sheetSetState) => Container(
         padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
         decoration: BoxDecoration(
@@ -564,7 +753,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    'Adds payment QR to unpaid invoices',
+                    'UPI payment QR, not a GST e-invoice QR',
                     style: TextStyle(fontSize: 12, color: T.muted(context)),
                   ),
                 ],
