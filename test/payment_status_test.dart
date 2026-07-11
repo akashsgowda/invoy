@@ -70,6 +70,23 @@ void main() {
     expect(inv.dueDateText, 'Due today');
   });
 
+  test('draft invoices never become overdue', () {
+    final inv = invoiceWithTotal(1000)
+      ..status = Status.draft
+      ..date = DateTime.now().subtract(const Duration(days: 30))
+      ..termDays = 0;
+
+    expect(inv.isOverdue, isFalse);
+    expect(inv.displayStatus, Status.draft);
+    expect(inv.dueDateText, 'Draft');
+  });
+
+  test('zero-value draft stays a draft instead of appearing paid', () {
+    final inv = invoiceWithTotal(0)..status = Status.draft;
+
+    expect(inv.displayStatus, Status.draft);
+  });
+
   test('full payment marks invoice paid', () {
     final inv = invoiceWithTotal(1000);
 

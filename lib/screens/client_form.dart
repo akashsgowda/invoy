@@ -56,6 +56,21 @@ class _ClientFormPageState extends State<ClientFormPage> {
       showAppSnack(context, 'Enter a valid 15-character GSTIN');
       return;
     }
+    final gstin = cleanGstin(_gstinC.text);
+    if (gstin.isNotEmpty) {
+      if (_addrC.text.trim().isEmpty) {
+        showAppSnack(context, 'Add the registered billing address');
+        return;
+      }
+      if (gstStateCode(_stateC.text) == null) {
+        showAppSnack(context, 'Enter a valid Indian state');
+        return;
+      }
+      if (!gstinMatchesState(gstin, _stateC.text)) {
+        showAppSnack(context, 'GSTIN does not match the selected state');
+        return;
+      }
+    }
 
     Navigator.pop(
       context,
@@ -64,7 +79,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
         email: _emailC.text.trim(),
         phone: _phoneC.text.trim(),
         address: _addrC.text.trim(),
-        gstin: cleanGstin(_gstinC.text),
+        gstin: gstin,
         state: _stateC.text.trim(),
       ),
     );

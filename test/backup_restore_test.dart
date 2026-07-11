@@ -7,6 +7,8 @@ import 'package:invoy/models.dart';
 void main() {
   tearDown(() {
     Prefs.lastBackupAt.value = '';
+    Prefs.signatureImage.value = '';
+    Prefs.signatureImageName.value = '';
   });
 
   test('backup json preview restores invoices clients and prefs', () {
@@ -41,6 +43,8 @@ void main() {
         'showUpiQr': false,
         'upiQrImage': 'abc123',
         'upiQrImageName': 'upi_qr.png',
+        'signatureImage': 'signature-data',
+        'signatureImageName': 'signature.png',
         'splitGst': true,
       },
       'clients': [
@@ -58,6 +62,8 @@ void main() {
     expect(preview.prefs['showUpiQr'], false);
     expect(preview.prefs['upiQrImage'], 'abc123');
     expect(preview.prefs['upiQrImageName'], 'upi_qr.png');
+    expect(preview.prefs['signatureImage'], 'signature-data');
+    expect(preview.prefs['signatureImageName'], 'signature.png');
     expect(preview.invoices.single.num, 'TEST-INV-042');
     expect(preview.invoices.single.total, 3186);
     expect(preview.invoices.single.paidAmt, 1000);
@@ -72,5 +78,22 @@ void main() {
     final prefs = payload['prefs'] as Map<String, dynamic>;
 
     expect(prefs['lastBackupAt'], backedUpAt.toIso8601String());
+  });
+
+  test('backup parser rejects duplicate invoice numbers', () {
+    final invoice = Invoice(id: 'one', num: 'INV-26-27-001');
+    final duplicate = Invoice(id: 'two', num: 'inv-26-27-001');
+    final content = jsonEncode({
+      'app': 'Invoy',
+      'version': 1,
+      'prefs': <String, dynamic>{},
+      'clients': <dynamic>[],
+      'invoices': [invoice.toMap(), duplicate.toMap()],
+    });
+
+    expect(
+      () => parseBackupJson(content, path: 'duplicate.json'),
+      throwsA(isA<FormatException>()),
+    );
   });
 }

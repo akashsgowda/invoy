@@ -130,13 +130,45 @@ class _CreatePageState extends State<CreatePage> {
   String? _issueValidationMessage(Invoice inv) {
     if (inv.client.name.trim().isEmpty) return 'Add a client first';
     if (inv.items.isEmpty) return 'Add at least one item';
-    if (Prefs.gstNum.value.trim().isNotEmpty && inv.gst > 0) {
+    if (inv.gst > 0) {
+      if (Prefs.gstNum.value.trim().isEmpty) {
+        return 'Add your GSTIN or choose No GST';
+      }
+      if (Prefs.bizAddress.value.trim().isEmpty) {
+        return 'Add your business address in Business Profile';
+      }
+      if (gstStateCode(Prefs.bizState.value) == null) {
+        return 'Add a valid business state in Business Profile';
+      }
+      if (!gstinMatchesState(Prefs.gstNum.value, Prefs.bizState.value)) {
+        return 'Business GSTIN does not match the business state';
+      }
       final place = inv.placeOfSupply.trim().isNotEmpty
           ? inv.placeOfSupply.trim()
           : inv.client.state.trim();
       if (place.isEmpty) return 'Add place of supply in invoice options';
+      if (gstStateCode(place) == null) return 'Enter a valid place of supply';
+      if (gstStateCode(inv.client.state) == null) {
+        return 'Add a valid state for this client';
+      }
+      if ((inv.client.gstin.trim().isNotEmpty || inv.total >= 50000) &&
+          inv.client.address.trim().isEmpty) {
+        return 'Add the client billing address for this GST invoice';
+      }
+      if (!gstinMatchesState(inv.client.gstin, inv.client.state)) {
+        return 'Client GSTIN does not match the client state';
+      }
       if (inv.items.any((i) => i.hsnSac.trim().isEmpty)) {
         return 'Add HSN/SAC for GST items';
+      }
+      if (Prefs.signatureImage.value.trim().isEmpty) {
+        return 'Add your signature in Business Profile';
+      }
+      final expectedSplit = splitGstForStates(Prefs.bizState.value, place);
+      if (expectedSplit != null && inv.splitGst != expectedSplit) {
+        return expectedSplit
+            ? 'Use CGST + SGST for this supply'
+            : 'Use IGST for this interstate supply';
       }
     }
     return null;
@@ -155,6 +187,11 @@ class _CreatePageState extends State<CreatePage> {
         if (_inv!.placeOfSupply.trim().isEmpty && c.state.trim().isNotEmpty) {
           _inv!.placeOfSupply = c.state.trim();
         }
+        final split = splitGstForStates(
+          Prefs.bizState.value,
+          _inv!.placeOfSupply,
+        );
+        if (split != null) _inv!.splitGst = split;
       });
     }
   }
@@ -654,6 +691,10 @@ class _MoreOptionsPageState extends State<_MoreOptionsPage> {
     return place.isEmpty ? 'Add place of supply' : place;
   }
 
+  String get _deliveryLabel => inv.deliveryAddress.trim().isEmpty
+      ? 'Same as billing address'
+      : inv.deliveryAddress.trim();
+
   String get _termsLabel {
     switch (inv.termDays) {
       case 0:
@@ -745,7 +786,33 @@ class _MoreOptionsPageState extends State<_MoreOptionsPage> {
     ctrl.dispose();
     if (!mounted) return;
     if (result == null) return;
-    setState(() => inv.placeOfSupply = result.trim());
+    setState(() {
+      inv.placeOfSupply = result.trim();
+      final split = splitGstForStates(
+        Prefs.bizState.value,
+        inv.placeOfSupply,
+      );
+      if (split != null) inv.splitGst = split;
+    });
+    widget.onChanged();
+  }
+
+  Future<void> _editDeliveryAddress() async {
+    final ctrl = TextEditingController(text: inv.deliveryAddress);
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => EditSheet(
+        title: 'Delivery address',
+        ctrl: ctrl,
+        hint: 'Leave blank if same as billing address',
+        dark: T.dark(context),
+      ),
+    );
+    ctrl.dispose();
+    if (!mounted || result == null) return;
+    setState(() => inv.deliveryAddress = result.trim());
     widget.onChanged();
   }
 
@@ -889,6 +956,14 @@ class _MoreOptionsPageState extends State<_MoreOptionsPage> {
           _sHeader('Optional'),
           const SizedBox(height: 8),
           _sCard([
+            _sRow(
+              'Delivery address',
+              _deliveryLabel,
+              onTap: _editDeliveryAddress,
+              valueIsHint: inv.deliveryAddress.trim().isEmpty,
+              stacked: true,
+            ),
+            _sDivider(),
             _sRow(
               'Notes',
               inv.notes.isEmpty ? 'Add notes or instructions' : inv.notes,

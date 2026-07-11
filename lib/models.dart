@@ -16,6 +16,104 @@ enum PayMode { upi, bank, cash, cheque }
 
 enum Status { draft, pending, paid, overdue }
 
+const double kMaxInvoiceAmount = 9e17;
+const double kMaxInvoiceQuantity = 999999999;
+const int kMaxInvoiceNumberLength = 16;
+const int kMaxInvoicePrefixLength = 5;
+
+const Map<String, String> _gstStateCodes = {
+  'jammuandkashmir': '01',
+  'himachalpradesh': '02',
+  'punjab': '03',
+  'chandigarh': '04',
+  'uttarakhand': '05',
+  'uttaranchal': '05',
+  'haryana': '06',
+  'delhi': '07',
+  'newdelhi': '07',
+  'rajasthan': '08',
+  'uttarpradesh': '09',
+  'bihar': '10',
+  'sikkim': '11',
+  'arunachalpradesh': '12',
+  'nagaland': '13',
+  'manipur': '14',
+  'mizoram': '15',
+  'tripura': '16',
+  'meghalaya': '17',
+  'assam': '18',
+  'westbengal': '19',
+  'jharkhand': '20',
+  'odisha': '21',
+  'orissa': '21',
+  'chhattisgarh': '22',
+  'madhyapradesh': '23',
+  'gujarat': '24',
+  'dadraandnagarhavelianddamananddiu': '26',
+  'damananddiu': '26',
+  'dadraandnagarhaveli': '26',
+  'maharashtra': '27',
+  'karnataka': '29',
+  'goa': '30',
+  'lakshadweep': '31',
+  'kerala': '32',
+  'tamilnadu': '33',
+  'puducherry': '34',
+  'pondicherry': '34',
+  'andamanandnicobarislands': '35',
+  'telangana': '36',
+  'andhrapradesh': '37',
+  'ladakh': '38',
+  'otherterritory': '97',
+};
+
+String _stateKey(String value) =>
+    value.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+
+String? gstStateCode(String state) => _gstStateCodes[_stateKey(state)];
+
+String gstStateWithCode(String state) {
+  final clean = state.trim();
+  final code = gstStateCode(clean);
+  if (code == null || RegExp('\\($code\\)\$').hasMatch(clean)) return clean;
+  return '$clean ($code)';
+}
+
+bool? splitGstForStates(String supplierState, String placeOfSupply) {
+  final supplierCode = gstStateCode(supplierState);
+  final supplyCode = gstStateCode(placeOfSupply);
+  if (supplierCode == null || supplyCode == null) return null;
+  return supplierCode == supplyCode;
+}
+
+bool gstinMatchesState(String gstin, String state) {
+  final clean = gstin.trim().toUpperCase();
+  if (clean.isEmpty) return true;
+  final code = gstStateCode(state);
+  return code == null || clean.startsWith(code);
+}
+
+String sanitizeInvoicePrefix(String value,
+    {int maxLength = kMaxInvoicePrefixLength}) {
+  final clean = value.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+  final fallback = clean.isEmpty ? 'INV' : clean;
+  return fallback.substring(0, fallback.length.clamp(0, maxLength));
+}
+
+String financialYearCode(DateTime date) {
+  final startYear = date.month >= 4 ? date.year : date.year - 1;
+  final start = (startYear % 100).toString().padLeft(2, '0');
+  final end = ((startYear + 1) % 100).toString().padLeft(2, '0');
+  return '$start-$end';
+}
+
+String buildInvoiceNumber(String prefix, DateTime date, int serial) {
+  final serialText = serial.clamp(1, 99999999).toString().padLeft(3, '0');
+  final suffix = '-${financialYearCode(date)}-$serialText';
+  final maxPrefix = (kMaxInvoiceNumberLength - suffix.length).clamp(1, 5);
+  return '${sanitizeInvoicePrefix(prefix, maxLength: maxPrefix)}$suffix';
+}
+
 class Customer {
   String name, email, phone, address, gstin, state;
   Customer({
@@ -174,7 +272,7 @@ class Payment {
 
 class Invoice {
   final String id;
-  String num, template, notes, placeOfSupply;
+  String num, template, notes, placeOfSupply, deliveryAddress;
   Customer client;
   List<LineItem> items;
   List<Payment> payments;
@@ -205,6 +303,7 @@ class Invoice {
     this.template = 'Classic',
     this.notes = '',
     this.placeOfSupply = '',
+    this.deliveryAddress = '',
     DateTime? createdAt,
   })  : client = client ?? Customer(),
         items = items ?? [],
@@ -229,6 +328,7 @@ class Invoice {
         template: template,
         notes: notes,
         placeOfSupply: placeOfSupply,
+        deliveryAddress: deliveryAddress,
         createdAt: createdAt,
       );
 
@@ -287,7 +387,8 @@ class Invoice {
   DateTime get due => date.add(Duration(days: termDays));
 
   bool get isOverdue {
-    if ((status == Status.paid && !isPartPaid) ||
+    if (status == Status.draft ||
+        (status == Status.paid && !isPartPaid) ||
         items.isEmpty ||
         balance <= 0) {
       return false;
@@ -299,10 +400,10 @@ class Invoice {
   }
 
   Status get displayStatus {
+    if (status == Status.draft) return Status.draft;
     if (items.isNotEmpty && balance <= 0) return Status.paid;
     if (status == Status.paid && payments.isEmpty) return Status.paid;
     if (isOverdue) return Status.overdue;
-    if (status == Status.draft) return Status.draft;
     if (items.isEmpty) return Status.draft;
     return Status.pending;
   }
@@ -354,6 +455,7 @@ class Invoice {
   }
 
   String get dueDateText {
+    if (displayStatus == Status.draft) return 'Draft';
     if (displayStatus == Status.paid) return 'Paid';
     if (isPartPaid && isOverdue) return 'Partial payment received';
     if (isPartPaid) return 'Balance due';
@@ -417,6 +519,7 @@ class Invoice {
         template: template,
         notes: notes,
         placeOfSupply: placeOfSupply,
+        deliveryAddress: deliveryAddress,
       );
 
   Map<String, dynamic> toMap() => {
@@ -440,6 +543,7 @@ class Invoice {
         'splitGst': splitGst ? 1 : 0,
         'reverseCharge': reverseCharge ? 1 : 0,
         'placeOfSupply': placeOfSupply,
+        'deliveryAddress': deliveryAddress,
         'status': status.name,
         'createdAt': createdAt.millisecondsSinceEpoch,
       };
@@ -477,6 +581,7 @@ class Invoice {
       splitGst: _safeBool(m['splitGst'], fallback: true),
       reverseCharge: _safeBool(m['reverseCharge']),
       placeOfSupply: m['placeOfSupply'] as String? ?? '',
+      deliveryAddress: m['deliveryAddress'] as String? ?? '',
       status: Status.values.firstWhere(
         (e) => e.name == m['status'],
         orElse: () => Status.draft,
@@ -538,13 +643,12 @@ bool _safeBool(Object? value, {bool fallback = false}) {
 
 class DB {
   static late Database instance;
-  static int _ctr = 0;
 
   static Future<void> init() async {
     final dbPath = await getDatabasesPath();
     instance = await openDatabase(
       p.join(dbPath, 'invoy_v2.db'),
-      version: 4,
+      version: 5,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE prefs (key TEXT PRIMARY KEY, val TEXT NOT NULL)
@@ -560,13 +664,13 @@ class DB {
             invoiceDate INTEGER, termDays INTEGER, gst REAL,
             discountValue REAL, discountIsPercent INTEGER,
             splitGst INTEGER, reverseCharge INTEGER,
-            placeOfSupply TEXT, status TEXT, createdAt INTEGER
+            placeOfSupply TEXT, deliveryAddress TEXT,
+            status TEXT, createdAt INTEGER
           )
         ''');
         await db.execute('''
           CREATE TABLE counter (id INTEGER PRIMARY KEY, val INTEGER)
         ''');
-        await db.insert('counter', {'id': 1, 'val': 0});
         await _createClientsTable(db);
         await _createSavedItemsTable(db);
       },
@@ -611,10 +715,16 @@ class DB {
             'TEXT DEFAULT ""',
           );
         }
+        if (oldVersion < 5) {
+          await _addColumnIfMissing(
+            db,
+            'invoices',
+            'deliveryAddress',
+            'TEXT DEFAULT ""',
+          );
+        }
       },
     );
-    final row = await instance.query('counter', where: 'id = 1');
-    _ctr = row.isNotEmpty ? _safeInt(row.first['val']) : 0;
   }
 
   static Future<void> _createClientsTable(Database db) async {
@@ -657,12 +767,43 @@ class DB {
     }
   }
 
-  static Future<String> nextNum() async {
-    _ctr++;
-    await instance.update('counter', {'val': _ctr}, where: 'id = 1');
-    final prefix = Prefs.invPrefix.value;
-    final year = DateTime.now().year;
-    return '$prefix-$year-${_ctr.toString().padLeft(3, '0')}';
+  static Future<String> nextNum(DateTime invoiceDate) async {
+    return instance.transaction((txn) async {
+      final periodId =
+          invoiceDate.month >= 4 ? invoiceDate.year : invoiceDate.year - 1;
+      final rows = await txn.query(
+        'counter',
+        where: 'id = ?',
+        whereArgs: [periodId],
+      );
+      var next = (rows.isEmpty ? 0 : _safeInt(rows.first['val'])) + 1;
+      var candidate = buildInvoiceNumber(
+        Prefs.invPrefix.value,
+        invoiceDate,
+        next,
+      );
+      while ((await txn.query(
+        'invoices',
+        columns: ['id'],
+        where: 'num = ?',
+        whereArgs: [candidate],
+        limit: 1,
+      ))
+          .isNotEmpty) {
+        next++;
+        candidate = buildInvoiceNumber(
+          Prefs.invPrefix.value,
+          invoiceDate,
+          next,
+        );
+      }
+      await txn.insert(
+        'counter',
+        {'id': periodId, 'val': next},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      return candidate;
+    });
   }
 
   static Future<void> saveInvoice(Invoice inv) async {
@@ -752,24 +893,23 @@ class DB {
   }
 
   static Future<void> resetCounterFromInvoices(List<Invoice> invoices) async {
-    var maxCounter = 0;
+    final maxByPeriod = <int, int>{};
     final numberEnd = RegExp(r'(\d+)$');
     for (final inv in invoices) {
       final match = numberEnd.firstMatch(inv.num);
       if (match == null) continue;
       final value = int.tryParse(match.group(1) ?? '');
-      if (value != null && value > maxCounter) {
-        maxCounter = value;
+      final periodId = inv.date.month >= 4 ? inv.date.year : inv.date.year - 1;
+      if (value != null && value > (maxByPeriod[periodId] ?? 0)) {
+        maxByPeriod[periodId] = value;
       }
     }
-    _ctr = maxCounter;
-    await instance.insert(
-        'counter',
-        {
-          'id': 1,
-          'val': _ctr,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    await instance.transaction((txn) async {
+      await txn.delete('counter');
+      for (final entry in maxByPeriod.entries) {
+        await txn.insert('counter', {'id': entry.key, 'val': entry.value});
+      }
+    });
   }
 
   static Future<List<Customer>> loadClients() async {
@@ -869,6 +1009,8 @@ class Prefs {
   static final upiId = ValueNotifier<String>('');
   static final upiQrImage = ValueNotifier<String>('');
   static final upiQrImageName = ValueNotifier<String>('');
+  static final signatureImage = ValueNotifier<String>('');
+  static final signatureImageName = ValueNotifier<String>('');
   static final invPrefix = ValueNotifier<String>('INV');
   static final defaultTemplate = ValueNotifier<String>('Classic');
   static final lastBackupAt = ValueNotifier<String>('');
@@ -893,6 +1035,8 @@ class Prefs {
     upiId.value = map['upiId'] ?? '';
     upiQrImage.value = map['upiQrImage'] ?? '';
     upiQrImageName.value = map['upiQrImageName'] ?? '';
+    signatureImage.value = map['signatureImage'] ?? '';
+    signatureImageName.value = map['signatureImageName'] ?? '';
     invPrefix.value = map['invPrefix'] ?? 'INV';
     defaultTemplate.value = map['defaultTemplate'] ?? 'Classic';
     lastBackupAt.value = map['lastBackupAt'] ?? '';
@@ -1021,6 +1165,16 @@ class Prefs {
       upiQrImageName,
       fallback: upiQrImageName.value,
     );
+    await saveText(
+      'signatureImage',
+      signatureImage,
+      fallback: signatureImage.value,
+    );
+    await saveText(
+      'signatureImageName',
+      signatureImageName,
+      fallback: signatureImageName.value,
+    );
     await saveText('invPrefix', invPrefix, fallback: invPrefix.value);
     await saveText(
       'defaultTemplate',
@@ -1143,6 +1297,13 @@ class Prefs {
     await _save('upiQrImageName', name);
   }
 
+  static Future<void> setSignatureImage(String data, String name) async {
+    signatureImage.value = data;
+    signatureImageName.value = name;
+    await _save('signatureImage', data);
+    await _save('signatureImageName', name);
+  }
+
   static Future<void> setDefaultTermDays(int v) async {
     defaultTermDays = v.clamp(0, 3650).toInt();
     await _save('defaultTermDays', '$defaultTermDays');
@@ -1205,13 +1366,14 @@ class Store {
 
     for (final inv in _list) {
       revenue += inv.collectedAmt;
-      if (inv.displayStatus == Status.paid) {
+      final displayStatus = inv.displayStatus;
+      if (displayStatus == Status.paid) {
         paid.add(inv);
-      } else {
+      } else if (displayStatus != Status.draft) {
         unpaid.add(inv);
         pending += inv.balance;
       }
-      if (inv.isOverdue) {
+      if (displayStatus == Status.overdue) {
         overdue.add(inv);
         overdueAmount += inv.balance;
       }
@@ -1240,7 +1402,7 @@ class Store {
     return Invoice(
       id: uid(),
       num: '',
-      gst: Prefs.defaultGst,
+      gst: Prefs.gstNum.value.trim().isEmpty ? 0 : Prefs.defaultGst,
       splitGst: Prefs.splitGst,
       termDays: Prefs.defaultTermDays,
       template: Prefs.defaultTemplate.value,
@@ -1275,8 +1437,11 @@ class Store {
   }
 
   Future<void> _ensureInvoiceNumber(Invoice inv) async {
-    if (inv.num.trim().isEmpty) {
-      inv.num = await DB.nextNum();
+    final duplicate = _list.any(
+      (existing) => existing.id != inv.id && existing.num == inv.num,
+    );
+    if (inv.num.trim().isEmpty || duplicate) {
+      inv.num = await DB.nextNum(inv.date);
     }
   }
 

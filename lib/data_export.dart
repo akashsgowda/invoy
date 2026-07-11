@@ -163,6 +163,8 @@ Map<String, dynamic> createBackupPayload({DateTime? backedUpAt}) {
       'upiId': Prefs.upiId.value,
       'upiQrImage': Prefs.upiQrImage.value,
       'upiQrImageName': Prefs.upiQrImageName.value,
+      'signatureImage': Prefs.signatureImage.value,
+      'signatureImageName': Prefs.signatureImageName.value,
       'invPrefix': Prefs.invPrefix.value,
       'defaultTemplate': Prefs.defaultTemplate.value,
       'lastBackupAt': backupTime,
@@ -273,6 +275,13 @@ BackupPreview parseBackupJson(String content, {String path = ''}) {
     }
     return Invoice.fromMap(map);
   }).toList();
+  final invoiceNumbers = <String>{};
+  for (final invoice in invoices) {
+    final number = invoice.num.trim().toUpperCase();
+    if (number.isNotEmpty && !invoiceNumbers.add(number)) {
+      throw const FormatException('Backup contains duplicate invoice numbers');
+    }
+  }
   final clients = clientsRaw is List
       ? clientsRaw.map((e) => Customer.fromMap(objectMap(e))).toList()
       : <Customer>[];
