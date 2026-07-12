@@ -20,8 +20,9 @@ class _ShellState extends State<Shell> {
   late int _tab = Prefs.startTab;
   int _invoiceTab = 0;
   int _invoiceNavigationRequest = 0;
-  late final Widget _dashboardPage;
-  late final Widget _clientsPage;
+  late Widget _dashboardPage;
+  late Widget _invoicePage;
+  late Widget _clientsPage;
   bool _loaded = Store.i.isLoaded;
   bool _loadError = false;
   bool _openingInvoice = false;
@@ -30,16 +31,28 @@ class _ShellState extends State<Shell> {
   @override
   void initState() {
     super.initState();
-    _dashboardPage = DashboardPage(
-      onSeeAll: () => _openInvoices(0),
-      onOpenInvoices: _openInvoices,
-    );
-    _clientsPage = ClientsPage(onAddClient: _newClient);
+    _dashboardPage = _buildDashboardPage();
+    _invoicePage = _buildInvoicePage();
+    _clientsPage = _buildClientsPage();
     if (_loaded) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_loadData());
     });
   }
+
+  Widget _buildDashboardPage() => DashboardPage(
+        onSeeAll: () => _openInvoices(0),
+        onOpenInvoices: _openInvoices,
+        onDataChanged: _refresh,
+      );
+
+  Widget _buildInvoicePage() => InvoicesPage(
+        onRefresh: _refresh,
+        initialTab: _invoiceTab,
+        navigationRequest: _invoiceNavigationRequest,
+      );
+
+  Widget _buildClientsPage() => ClientsPage(onAddClient: _newClient);
 
   Future<void> _loadData() async {
     try {
@@ -70,18 +83,16 @@ class _ShellState extends State<Shell> {
 
   void _refresh() {
     if (!mounted) return;
-    setState(() {});
+    setState(() {
+      _dashboardPage = _buildDashboardPage();
+      _invoicePage = _buildInvoicePage();
+      _clientsPage = _buildClientsPage();
+    });
   }
 
   void _switchTab(int i) {
     FocusManager.instance.primaryFocus?.unfocus();
-    setState(() {
-      _tab = i;
-      if (i == 1) {
-        _invoiceTab = 0;
-        _invoiceNavigationRequest++;
-      }
-    });
+    setState(() => _tab = i);
   }
 
   void _openInvoices(int filterTab) {
@@ -89,6 +100,7 @@ class _ShellState extends State<Shell> {
     setState(() {
       _invoiceTab = filterTab.clamp(0, 3);
       _invoiceNavigationRequest++;
+      _invoicePage = _buildInvoicePage();
       _tab = 1;
     });
   }
@@ -123,9 +135,13 @@ class _ShellState extends State<Shell> {
         slideRoute(const ClientFormPage()),
       );
       if (c == null || c.name.trim().isEmpty) return;
-      await Store.i.saveClient(c);
-      if (!mounted) return;
-      _refresh();
+      try {
+        await Store.i.saveClient(c);
+        if (!mounted) return;
+        _refresh();
+      } catch (_) {
+        if (mounted) showAppSnack(context, "Couldn't save this client");
+      }
     } finally {
       _openingClient = false;
     }
@@ -144,11 +160,7 @@ class _ShellState extends State<Shell> {
     }
     final pages = <Widget>[
       _dashboardPage,
-      InvoicesPage(
-        onRefresh: _refresh,
-        initialTab: _invoiceTab,
-        navigationRequest: _invoiceNavigationRequest,
-      ),
+      _invoicePage,
       _clientsPage,
     ];
 

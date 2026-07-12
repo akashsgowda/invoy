@@ -111,6 +111,11 @@ class _OnboardScreenState extends State<OnboardScreen> {
       showAppSnack(context, 'Choose a smaller QR image');
       return;
     }
+    if (!isSupportedRasterImage(bytes)) {
+      if (!mounted) return;
+      showAppSnack(context, 'Choose a valid PNG, JPG or WebP image');
+      return;
+    }
 
     if (!mounted) return;
     setState(() {

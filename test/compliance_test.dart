@@ -30,6 +30,10 @@ void main() {
     expect(splitGstForStates('Karnataka', 'Tamil Nadu'), isFalse);
     expect(gstinMatchesState('29ABCDE1234F1Z5', 'Karnataka'), isTrue);
     expect(gstinMatchesState('33ABCDE1234F1Z5', 'Karnataka'), isFalse);
+    expect(isValidHsnSac('9983'), isTrue);
+    expect(isValidHsnSac('998391'), isTrue);
+    expect(isValidHsnSac('12345678'), isTrue);
+    expect(isValidHsnSac('99A391'), isFalse);
   });
 
   test('delivery address survives invoice persistence mapping', () {
@@ -41,5 +45,16 @@ void main() {
 
     final restored = Invoice.fromMap(invoice.toMap());
     expect(restored.deliveryAddress, 'Warehouse 4, Bengaluru');
+  });
+
+  test('image uploads accept only supported raster signatures', () {
+    expect(
+      isSupportedRasterImage(
+        const [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+      ),
+      isTrue,
+    );
+    expect(isSupportedRasterImage(const [0xFF, 0xD8, 0xFF]), isTrue);
+    expect(isSupportedRasterImage(const [1, 2, 3, 4]), isFalse);
   });
 }

@@ -64,7 +64,7 @@ class _ClientsPageState extends State<ClientsPage> {
       s.total++;
       if (inv.displayStatus == Status.paid) {
         s.paidCount++;
-      } else {
+      } else if (inv.displayStatus != Status.draft) {
         s.unpaidAmt += inv.balance;
       }
     }

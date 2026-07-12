@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../theme.dart';
 import '../models.dart';
@@ -13,20 +15,12 @@ enum _Period { thisMonth, lastMonth, thisYear, allTime }
 class _DashboardMetrics {
   final double revenue;
   final double prevRevenue;
-  final double pending;
-  final double overdue;
-  final int pendingCount;
-  final int overdueCount;
   final List<DateTime> trendPoints;
   final List<double> trendData;
 
   const _DashboardMetrics({
     required this.revenue,
     required this.prevRevenue,
-    required this.pending,
-    required this.overdue,
-    required this.pendingCount,
-    required this.overdueCount,
     required this.trendPoints,
     required this.trendData,
   });
@@ -36,10 +30,6 @@ class _DashboardMetrics {
     final filteredCollections = <InvoiceCollection>[];
     var revenue = 0.0;
     var prevRevenue = 0.0;
-    var pending = 0.0;
-    var overdue = 0.0;
-    var pendingCount = 0;
-    var overdueCount = 0;
 
     bool sameMonth(DateTime date, DateTime target) =>
         date.year == target.year && date.month == target.month;
@@ -81,17 +71,6 @@ class _DashboardMetrics {
       revenue += collection.amount;
     }
 
-    for (final inv in all) {
-      final status = inv.displayStatus;
-      if (status == Status.pending) {
-        pending += inv.balance;
-        pendingCount++;
-      } else if (status == Status.overdue) {
-        overdue += inv.balance;
-        overdueCount++;
-      }
-    }
-
     final points = _trendPointsFor(all, collections, period, now);
     final buckets = <int, double>{};
     for (final collection in filteredCollections) {
@@ -103,6 +82,14 @@ class _DashboardMetrics {
     }
 
     var running = 0.0;
+    if (period == _Period.allTime && points.isNotEmpty) {
+      final firstVisibleMonth = DateTime(points.first.year, points.first.month);
+      for (final collection in filteredCollections) {
+        if (collection.date.isBefore(firstVisibleMonth)) {
+          running += collection.amount;
+        }
+      }
+    }
     final data = <double>[];
     for (final point in points) {
       final key = period == _Period.thisYear || period == _Period.allTime
@@ -115,10 +102,6 @@ class _DashboardMetrics {
     return _DashboardMetrics(
       revenue: revenue,
       prevRevenue: prevRevenue,
-      pending: pending,
-      overdue: overdue,
-      pendingCount: pendingCount,
-      overdueCount: overdueCount,
       trendPoints: points,
       trendData: data,
     );
@@ -172,7 +155,13 @@ class _DashboardMetrics {
 class DashboardPage extends StatefulWidget {
   final VoidCallback? onSeeAll;
   final void Function(int invoiceTab)? onOpenInvoices;
-  const DashboardPage({super.key, this.onSeeAll, this.onOpenInvoices});
+  final VoidCallback? onDataChanged;
+  const DashboardPage({
+    super.key,
+    this.onSeeAll,
+    this.onOpenInvoices,
+    this.onDataChanged,
+  });
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
@@ -184,6 +173,13 @@ class _DashboardPageState extends State<DashboardPage> {
   List<Invoice>? _metricsSource;
   _Period? _metricsPeriod;
   _DashboardMetrics? _metricsCache;
+  Timer? _trendClearTimer;
+
+  @override
+  void dispose() {
+    _trendClearTimer?.cancel();
+    super.dispose();
+  }
 
   // ── Period helpers ───────────────────────────────────────────
 
@@ -281,7 +277,16 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   void _clearTrendSelection() {
+    _trendClearTimer?.cancel();
     if (_selectedTrendIndex != null) setState(() => _selectedTrendIndex = null);
+  }
+
+  void _scheduleTrendClear() {
+    _trendClearTimer?.cancel();
+    _trendClearTimer = Timer(
+      Prefs.reduceMotion ? Duration.zero : const Duration(milliseconds: 900),
+      _clearTrendSelection,
+    );
   }
 
   void _seeAll() {
@@ -375,7 +380,10 @@ class _DashboardPageState extends State<DashboardPage> {
       context,
       slideRoute(const SettingsPage(section: SettingsSection.data)),
     ).then((_) {
-      if (mounted) _r();
+      if (mounted) {
+        _r();
+        widget.onDataChanged?.call();
+      }
     });
   }
 
@@ -694,7 +702,9 @@ class _DashboardPageState extends State<DashboardPage> {
                             ),
                             const SizedBox(height: 5),
                             Text(
-                              '${inv.dueDateText}  ·  ${inv.num}',
+                              inv.displayStatus == Status.draft
+                                  ? 'Draft'
+                                  : '${inv.dueDateText}  ·  ${inv.displayNumber}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -823,10 +833,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     _selectTrendAt(d.localPosition.dx, constraints.maxWidth),
                 onHorizontalDragUpdate: (d) =>
                     _selectTrendAt(d.localPosition.dx, constraints.maxWidth),
-                onHorizontalDragEnd: (_) => Future.delayed(
-                  const Duration(milliseconds: 900),
-                  _clearTrendSelection,
-                ),
+                onHorizontalDragEnd: (_) => _scheduleTrendClear(),
                 child: Stack(
                   children: [
                     Positioned.fill(
@@ -1117,7 +1124,10 @@ class _AccountDrawer extends StatelessWidget {
           return SpringTap(
             onTap: () {
               Navigator.pop(context);
-              Future.microtask(action.onTap);
+              Future.delayed(
+                Prefs.reduceMotion ? Duration.zero : kSegmentDuration,
+                action.onTap,
+              );
             },
             scale: 0.955,
             child: AnimatedContainer(

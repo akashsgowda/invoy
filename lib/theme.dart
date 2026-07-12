@@ -5,6 +5,7 @@ const kSmooth = Curves.easeOutCubic;
 const kPop = Curves.easeOutBack;
 const kSegmentDuration = Duration(milliseconds: 220);
 const kSegmentTextDuration = Duration(milliseconds: 180);
+bool reduceAppMotion = false;
 
 // ─── Color Tokens ────────────────────────────────────────────────
 
@@ -431,8 +432,11 @@ InvTemplate tplOf(String name) =>
 
 Route<R> slideRoute<R>(Widget page) => PageRouteBuilder<R>(
       pageBuilder: (_, __, ___) => page,
-      transitionDuration: const Duration(milliseconds: 260),
-      reverseTransitionDuration: const Duration(milliseconds: 200),
+      transitionDuration: reduceAppMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 260),
+      reverseTransitionDuration:
+          reduceAppMotion ? Duration.zero : const Duration(milliseconds: 200),
       transitionsBuilder: (_, a, __, child) {
         final curved = CurvedAnimation(
           parent: a,
@@ -454,8 +458,11 @@ Route<R> slideRoute<R>(Widget page) => PageRouteBuilder<R>(
 
 Route<R> slideUpRoute<R>(Widget page) => PageRouteBuilder<R>(
       pageBuilder: (_, __, ___) => page,
-      transitionDuration: const Duration(milliseconds: 260),
-      reverseTransitionDuration: const Duration(milliseconds: 200),
+      transitionDuration: reduceAppMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 260),
+      reverseTransitionDuration:
+          reduceAppMotion ? Duration.zero : const Duration(milliseconds: 200),
       transitionsBuilder: (_, a, __, child) {
         final curved = CurvedAnimation(
           parent: a,

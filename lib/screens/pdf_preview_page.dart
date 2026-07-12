@@ -19,6 +19,7 @@ class PdfPreviewPage extends StatefulWidget {
 class _PdfPreviewPageState extends State<PdfPreviewPage> {
   late Future<_RenderedPdf> _future;
   bool _saving = false;
+  bool _sharing = false;
 
   @override
   void initState() {
@@ -45,14 +46,19 @@ class _PdfPreviewPageState extends State<PdfPreviewPage> {
   }
 
   Future<void> _share(Uint8List bytes) async {
+    if (_sharing) return;
+    setState(() => _sharing = true);
     try {
       await Printing.sharePdf(
         bytes: bytes,
-        filename: '${widget.invoice.num}.pdf',
+        filename:
+            '${widget.invoice.displayNumber.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}.pdf',
       ).timeout(const Duration(seconds: 20));
     } catch (_) {
       if (!mounted) return;
       _snack('Could not open share sheet');
+    } finally {
+      if (mounted) setState(() => _sharing = false);
     }
   }
 
@@ -68,9 +74,10 @@ class _PdfPreviewPageState extends State<PdfPreviewPage> {
     if (_saving) return;
     setState(() => _saving = true);
     try {
-      final path = await savePdfBytes(bytes, widget.invoice.num);
+      final path = await savePdfBytes(bytes, widget.invoice.displayNumber);
+      if (path == null) return;
       if (!mounted) return;
-      _snack('Saved PDF to $path');
+      _snack('PDF saved');
     } catch (_) {
       if (!mounted) return;
       _snack('Could not save PDF');
@@ -222,7 +229,9 @@ class _PdfPreviewPageState extends State<PdfPreviewPage> {
                           child: AppButton(
                             label: 'Share',
                             icon: Icons.share_rounded,
-                            onTap: () => _share(rendered.bytes),
+                            loading: _sharing,
+                            onTap:
+                                _sharing ? null : () => _share(rendered.bytes),
                           ),
                         ),
                       ],

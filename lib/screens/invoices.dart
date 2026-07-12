@@ -63,9 +63,15 @@ class _InvoicesPageState extends State<InvoicesPage> {
   }
 
   Future<void> _del(String id) async {
-    await Store.i.delete(id);
-    if (!mounted) return;
-    _r();
+    try {
+      await Store.i.delete(id);
+      if (!mounted) return;
+      _r();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {});
+      showAppSnack(context, "Couldn't delete this invoice");
+    }
   }
 
   List<Invoice> _sorted(List<Invoice> source) {
@@ -114,9 +120,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
   void _open(Invoice inv) => Navigator.push(
         context,
         slideRoute(DetailPage(invoice: inv, onRefresh: _r)),
-      ).then((_) {
-        if (mounted) _r();
-      });
+      );
 
   Future<void> _newInvoice() async {
     if (_openingInvoice) return;
@@ -495,7 +499,9 @@ class _InvRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final urgent = inv.displayStatus == Status.overdue;
-    final meta = '${inv.num}  ·  $_dueLine';
+    final meta = inv.displayStatus == Status.draft
+        ? 'Draft'
+        : '${inv.displayNumber}  ·  $_dueLine';
 
     return Dismissible(
       key: Key(inv.id),
@@ -525,7 +531,9 @@ class _InvRow extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
           ),
           content: Text(
-            'Remove ${inv.num}?',
+            inv.displayStatus == Status.draft
+                ? 'Remove this draft?'
+                : 'Remove ${inv.displayNumber}?',
             style: TextStyle(color: T.muted(context)),
           ),
           actions: [
@@ -548,7 +556,7 @@ class _InvRow extends StatelessWidget {
         message: 'Open invoice. Swipe left to delete.',
         child: Semantics(
           button: true,
-          label: 'Open invoice ${inv.num}',
+          label: 'Open invoice ${inv.displayNumber}',
           hint: 'Swipe left to delete',
           child: SpringTap(
             scale: 0.99,

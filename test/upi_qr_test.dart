@@ -62,6 +62,14 @@ void main() {
     expect(upiPaymentUriForInvoice(invoice(paid: 1000)), isNull);
   });
 
+  test('legacy paid and draft invoices never show a payment QR', () {
+    final legacyPaid = invoice()..status = Status.paid;
+    final draft = invoice()..status = Status.draft;
+
+    expect(upiPaymentUriForInvoice(legacyPaid), isNull);
+    expect(upiPaymentUriForInvoice(draft), isNull);
+  });
+
   test('upi qr link is hidden when disabled or upi id is missing', () {
     Prefs.showUpiQr = false;
     expect(upiPaymentUriForInvoice(invoice()), isNull);

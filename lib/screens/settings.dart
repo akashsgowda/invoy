@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../app_metadata.dart';
 import '../theme.dart';
 import '../models.dart';
 import '../widgets.dart';
@@ -193,7 +194,7 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 28),
             _sLabel('App'),
             _block([
-              _info('Version', '1.0.0'),
+              _info('Version', appVersionLabel),
               _div(),
               SpringTap(
                 onTap: () async {
@@ -205,7 +206,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         borderRadius: BorderRadius.circular(16),
                       ),
                       title: Text(
-                        'Reset app?',
+                        'Run setup again?',
                         style: TextStyle(
                           color: T.text(context),
                           fontWeight: FontWeight.w600,
@@ -213,7 +214,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ),
                       content: Text(
-                        'Clears onboarding. Your data stays.',
+                        'Reopens the setup screens. Invoices and clients stay.',
                         style: TextStyle(color: T.muted(context), fontSize: 14),
                       ),
                       actions: [
@@ -227,7 +228,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         TextButton(
                           onPressed: () => Navigator.pop(context, true),
                           child: const Text(
-                            'Reset',
+                            'Continue',
                             style: TextStyle(
                               color: C.overdue,
                               fontWeight: FontWeight.w600,
@@ -250,7 +251,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: Row(
                     children: [
                       Text(
-                        'Reset onboarding',
+                        'Run setup again',
                         style: TextStyle(fontSize: 14, color: C.overdue),
                       ),
                       Spacer(),
@@ -371,12 +372,11 @@ class _SettingsPageState extends State<SettingsPage> {
       final path = action == _DataAction.save
           ? await exportInvoicesCsv()
           : await shareInvoicesCsv();
+      if (path == null) return;
       if (!mounted) return;
       showAppSnack(
         context,
-        action == _DataAction.save
-            ? _savedMessage(path, 'CSV saved')
-            : 'CSV ready to share',
+        action == _DataAction.save ? 'CSV saved' : 'CSV ready to share',
       );
     } catch (_) {
       if (!mounted) return;
@@ -392,14 +392,13 @@ class _SettingsPageState extends State<SettingsPage> {
       final path = action == _DataAction.save
           ? await exportBackupJson(backedUpAt: backedUpAt)
           : await shareBackupJson(backedUpAt: backedUpAt);
+      if (path == null) return;
       await Prefs.setLastBackupAt(backedUpAt);
       if (!mounted) return;
       setState(() {});
       showAppSnack(
         context,
-        action == _DataAction.save
-            ? _savedMessage(path, 'Backup saved')
-            : 'Backup ready to share',
+        action == _DataAction.save ? 'Backup saved' : 'Backup ready to share',
       );
     } catch (_) {
       if (!mounted) return;
@@ -414,11 +413,12 @@ class _SettingsPageState extends State<SettingsPage> {
       final path = action == _DataAction.save
           ? await exportGstSummaryCsv()
           : await shareGstSummaryCsv();
+      if (path == null) return;
       if (!mounted) return;
       showAppSnack(
         context,
         action == _DataAction.save
-            ? _savedMessage(path, 'GST summary saved')
+            ? 'GST summary saved'
             : 'GST summary ready to share',
       );
     } catch (_) {
@@ -563,10 +563,6 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       );
 
-  String _savedMessage(String path, String fallback) {
-    return path.contains('/Download') ? '$fallback to Downloads' : fallback;
-  }
-
   String get _lastBackupLabel {
     final raw = Prefs.lastBackupAt.value;
     final date = DateTime.tryParse(raw);
@@ -594,8 +590,8 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 16),
             _sheetAction(
               icon: Icons.save_alt_rounded,
-              title: 'Save to Downloads',
-              subtitle: 'Keep a file on this device',
+              title: 'Save file',
+              subtitle: 'Choose where to keep it',
               onTap: () => Navigator.pop(context, _DataAction.save),
             ),
             Divider(height: 1, color: T.divider(context)),
@@ -1072,13 +1068,4 @@ class _PickerSheetState extends State<_PickerSheet> {
           ],
         ),
       );
-}
-
-// ── Legacy alias ─────────────────────────────────────────────────
-
-class SettingsSheet extends StatelessWidget {
-  final VoidCallback onChanged;
-  const SettingsSheet({super.key, required this.onChanged});
-  @override
-  Widget build(BuildContext context) => const SettingsPage();
 }

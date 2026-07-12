@@ -32,6 +32,8 @@ const _commonUnits = [
 
 const _commonGstRates = [0.0, 5.0, 12.0, 18.0, 28.0];
 
+enum _SaveAction { draft, create, changes }
+
 // ════════════════════════════════════════════════════════════════
 // CREATE PAGE  —  Quick Invoice
 // ════════════════════════════════════════════════════════════════
@@ -54,6 +56,7 @@ class _CreatePageState extends State<CreatePage> {
   Invoice? _inv;
   late bool _isNew;
   bool _loading = false;
+  _SaveAction? _saveAction;
 
   @override
   void initState() {
@@ -70,6 +73,15 @@ class _CreatePageState extends State<CreatePage> {
             _loading = false;
           });
         }
+      }).catchError((e) {
+        if (mounted) {
+          setState(() {
+            _loading = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to create invoice')),
+          );
+        }
       });
     }
   }
@@ -77,53 +89,80 @@ class _CreatePageState extends State<CreatePage> {
   // ── Actions ─────────────────────────────────────────────────
 
   Future<void> _saveDraft() async {
-    if (_inv == null) return;
-    _inv!.status = Status.draft;
-    await widget.onSaved(_inv!);
-    if (!mounted) return;
-    Navigator.pop(context, true);
+    final inv = _inv;
+    if (inv == null || _saveAction != null) return;
+    setState(() => _saveAction = _SaveAction.draft);
+    try {
+      inv.status = Status.draft;
+      await widget.onSaved(inv);
+      if (mounted) Navigator.pop(context, true);
+    } catch (_) {
+      if (mounted) showAppSnack(context, "Couldn't save this draft");
+    } finally {
+      if (mounted) setState(() => _saveAction = null);
+    }
   }
 
   Future<void> _saveChanges() async {
-    if (_inv == null) return;
-    if (_inv!.status != Status.draft) {
-      final validation = _issueValidationMessage(_inv!);
+    final inv = _inv;
+    if (inv == null || _saveAction != null) return;
+    if (inv.status != Status.draft) {
+      final validation = _issueValidationMessage(inv);
       if (validation != null) {
         if (Prefs.haptics) HapticFeedback.mediumImpact();
         showAppSnack(context, validation);
         return;
       }
     }
-    await widget.onSaved(_inv!);
-    if (!mounted) return;
-    Navigator.pop(context, true);
+    setState(() => _saveAction = _SaveAction.changes);
+    try {
+      await widget.onSaved(inv);
+      if (mounted) Navigator.pop(context, true);
+    } catch (_) {
+      if (mounted) showAppSnack(context, "Couldn't save your changes");
+    } finally {
+      if (mounted) setState(() => _saveAction = null);
+    }
   }
 
   Future<void> _createInvoice() async {
-    if (_inv == null) return;
-    if (!_isNew) {
+    final inv = _inv;
+    if (inv == null || _saveAction != null) return;
+    if (!_isNew && inv.status != Status.draft) {
       await _saveChanges();
       return;
     }
-    final validation = _issueValidationMessage(_inv!);
+    final validation = _issueValidationMessage(inv);
     if (validation != null) {
       if (Prefs.haptics) HapticFeedback.mediumImpact();
       showAppSnack(context, validation);
       return;
     }
-    _inv!.status = Status.pending;
-    await widget.onSaved(_inv!);
-    for (final item in _inv!.items) {
-      await Store.i.saveSavedItem(item);
+    final previousStatus = inv.status;
+    setState(() => _saveAction = _SaveAction.create);
+    inv.status = Status.pending;
+    try {
+      await widget.onSaved(inv);
+    } catch (_) {
+      inv.status = previousStatus;
+      if (mounted) {
+        showAppSnack(context, "Couldn't create this invoice");
+        setState(() => _saveAction = null);
+      }
+      return;
     }
     if (!mounted) return;
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      isDismissible: true,
-      builder: (_) => _PostInvoiceSheet(inv: _inv!),
-    );
+    try {
+      await showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        isDismissible: true,
+        builder: (_) => _PostInvoiceSheet(inv: inv),
+      );
+    } catch (_) {
+      if (mounted) showAppSnack(context, 'Invoice created successfully');
+    }
     if (mounted) Navigator.pop(context, true);
   }
 
@@ -131,6 +170,9 @@ class _CreatePageState extends State<CreatePage> {
     if (inv.client.name.trim().isEmpty) return 'Add a client first';
     if (inv.items.isEmpty) return 'Add at least one item';
     if (inv.gst > 0) {
+      if (Prefs.bizName.value.trim().isEmpty) {
+        return 'Add your registered business name in Business Profile';
+      }
       if (Prefs.gstNum.value.trim().isEmpty) {
         return 'Add your GSTIN or choose No GST';
       }
@@ -160,6 +202,9 @@ class _CreatePageState extends State<CreatePage> {
       }
       if (inv.items.any((i) => i.hsnSac.trim().isEmpty)) {
         return 'Add HSN/SAC for GST items';
+      }
+      if (inv.items.any((i) => !isValidHsnSac(i.hsnSac))) {
+        return 'Use a valid 4, 6 or 8 digit HSN/SAC';
       }
       if (Prefs.signatureImage.value.trim().isEmpty) {
         return 'Add your signature in Business Profile';
@@ -202,10 +247,13 @@ class _CreatePageState extends State<CreatePage> {
       context,
       slideUpRoute(_AddItemPage(defaultGst: _inv!.gst)),
     );
-    if (item != null) {
-      await Store.i.saveSavedItem(item);
-      if (!mounted) return;
+    if (item != null && mounted) {
       setState(() => _inv!.items.add(item));
+      try {
+      await Store.i.saveSavedItem(item);
+      } catch (_) {
+        // The invoice item is still valid if the reusable catalog cannot save.
+      }
     }
   }
 
@@ -216,13 +264,17 @@ class _CreatePageState extends State<CreatePage> {
       slideUpRoute(_AddItemPage(item: current, defaultGst: _inv!.gst)),
     );
     if (item == null) return;
-    await Store.i.saveSavedItem(item);
     if (!mounted) return;
     setState(() {
       final index = _inv!.items.indexWhere((i) => i.id == current.id);
       if (index == -1) return;
       _inv!.items[index] = item;
     });
+    try {
+      await Store.i.saveSavedItem(item);
+    } catch (_) {
+      // The edited invoice item should not depend on the reusable catalog.
+    }
   }
 
   Future<void> _openMoreOptions() async {
@@ -258,108 +310,121 @@ class _CreatePageState extends State<CreatePage> {
 
     final inv = _inv!;
 
-    return Scaffold(
-      backgroundColor: T.bg(context),
-      appBar: AppBar(
+    final isDraftFlow = _isNew || inv.status == Status.draft;
+
+    return PopScope(
+      canPop: _saveAction == null,
+      child: Scaffold(
         backgroundColor: T.bg(context),
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: IconButton(
-          tooltip: _isNew ? 'Close' : 'Back',
-          onPressed: () => Navigator.pop(context),
-          icon: Icon(
-            _isNew ? Icons.close_rounded : Icons.arrow_back_rounded,
-            size: 20,
-            color: T.text(context),
+        appBar: AppBar(
+          backgroundColor: T.bg(context),
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          leading: IconButton(
+            tooltip: _isNew ? 'Close' : 'Back',
+            onPressed:
+                _saveAction == null ? () => Navigator.pop(context) : null,
+            icon: Icon(
+              _isNew ? Icons.close_rounded : Icons.arrow_back_rounded,
+              size: 20,
+              color: T.text(context),
+            ),
           ),
+          title: Text(
+            _isNew
+                ? 'Quick Invoice'
+                : inv.status == Status.draft
+                    ? 'Edit Draft'
+                    : 'Edit Invoice',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: T.text(context),
+            ),
+          ),
+          centerTitle: true,
         ),
-        title: Text(
-          _isNew ? 'Quick Invoice' : 'Edit Invoice',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: T.text(context),
-          ),
-        ),
-        centerTitle: true,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.only(top: 18, bottom: 120),
-        children: [
-          // ── Client ──────────────────────────────────────────
-          const _SecLabel('Client'),
-          _FlatRow(
-            leading:
-                inv.client.isEmpty ? _addIcon() : _initAvatar(inv.client.name),
-            title: inv.client.isEmpty ? 'Add client' : inv.client.name,
-            subtitle: inv.client.isEmpty ? null : inv.client.email,
-            onTap: _openClientPicker,
-          ),
+        body: ListView(
+          padding: const EdgeInsets.only(top: 18, bottom: 120),
+          children: [
+            // ── Client ──────────────────────────────────────────
+            const _SecLabel('Client'),
+            _FlatRow(
+              leading: inv.client.isEmpty
+                  ? _addIcon()
+                  : _initAvatar(inv.client.name),
+              title: inv.client.isEmpty ? 'Add client' : inv.client.name,
+              subtitle: inv.client.isEmpty ? null : inv.client.email,
+              onTap: _openClientPicker,
+            ),
 
-          const SizedBox(height: 24),
+            const SizedBox(height: 24),
 
-          // ── Items ───────────────────────────────────────────
-          const _SecLabel('Items'),
-          _FlatRow(leading: _addIcon(), title: 'Add item', onTap: _openAddItem),
-          if (inv.items.isNotEmpty)
-            ...inv.items.map(
-              (item) => _ItemTile(
-                item: item,
-                onTap: () => _openEditItem(item),
-                onDelete: () => setState(
-                  () => inv.items.removeWhere((i) => i.id == item.id),
+            // ── Items ───────────────────────────────────────────
+            const _SecLabel('Items'),
+            _FlatRow(
+                leading: _addIcon(), title: 'Add item', onTap: _openAddItem),
+            if (inv.items.isNotEmpty)
+              ...inv.items.map(
+                (item) => _ItemTile(
+                  item: item,
+                  onTap: () => _openEditItem(item),
+                  onDelete: () => setState(
+                    () => inv.items.removeWhere((i) => i.id == item.id),
+                  ),
+                ),
+              ),
+
+            const SizedBox(height: 24),
+
+            // ── Amount summary ───────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: T.card(context),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: T.border(context), width: 0.5),
+                ),
+                child: Column(
+                  children: [
+                    _amtRow('Amount due', amtUi(inv.sub), false),
+                    if (inv.discountAmount > 0) ...[
+                      const SizedBox(height: 8),
+                      _amtRow(
+                          'Discount', '-${amtUi(inv.discountAmount)}', true),
+                    ],
+                    if (inv.gst > 0) ...[
+                      const SizedBox(height: 8),
+                      _amtRow(
+                        _taxSummaryLabel(inv),
+                        amtUi(inv.tax),
+                        true,
+                      ),
+                    ],
+                    Divider(height: 20, color: T.divider(context)),
+                    _amtRow('Total', amtUi(inv.total), false, bold: true),
+                  ],
                 ),
               ),
             ),
 
-          const SizedBox(height: 24),
+            const SizedBox(height: 24),
 
-          // ── Amount summary ───────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: T.card(context),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: T.border(context), width: 0.5),
-              ),
-              child: Column(
-                children: [
-                  _amtRow('Amount due', amtUi(inv.sub), false),
-                  if (inv.discountAmount > 0) ...[
-                    const SizedBox(height: 8),
-                    _amtRow('Discount', '-${amtUi(inv.discountAmount)}', true),
-                  ],
-                  if (inv.gst > 0) ...[
-                    const SizedBox(height: 8),
-                    _amtRow(
-                      _taxSummaryLabel(inv),
-                      amtUi(inv.tax),
-                      true,
-                    ),
-                  ],
-                  Divider(height: 20, color: T.divider(context)),
-                  _amtRow('Total', amtUi(inv.total), false, bold: true),
-                ],
-              ),
+            // ── More options ─────────────────────────────────────
+            _FlatRow(
+              title: 'Invoice options',
+              subtitle: 'GST, payment terms, PDF style and notes',
+              onTap: _openMoreOptions,
             ),
-          ),
+          ],
+        ),
 
-          const SizedBox(height: 24),
-
-          // ── More options ─────────────────────────────────────
-          _FlatRow(
-            title: 'Invoice options',
-            subtitle: 'GST, payment terms, PDF style and notes',
-            onTap: _openMoreOptions,
-          ),
-        ],
+        // ── Bottom bar ───────────────────────────────────────────
+        bottomNavigationBar:
+            isDraftFlow ? _createBottomBar(context) : _editBottomBar(context),
       ),
-
-      // ── Bottom bar ───────────────────────────────────────────
-      bottomNavigationBar:
-          _isNew ? _createBottomBar(context) : _editBottomBar(context),
     );
   }
 
@@ -374,7 +439,8 @@ class _CreatePageState extends State<CreatePage> {
               Expanded(
                 child: AppButton(
                   label: 'Save Draft',
-                  onTap: _saveDraft,
+                  onTap: _saveAction == null ? _saveDraft : null,
+                  loading: _saveAction == _SaveAction.draft,
                   tone: AppButtonTone.secondary,
                 ),
               ),
@@ -383,7 +449,8 @@ class _CreatePageState extends State<CreatePage> {
                 flex: 2,
                 child: AppButton(
                   label: 'Create Invoice',
-                  onTap: _createInvoice,
+                  onTap: _saveAction == null ? _createInvoice : null,
+                  loading: _saveAction == _SaveAction.create,
                 ),
               ),
             ],
@@ -399,7 +466,8 @@ class _CreatePageState extends State<CreatePage> {
             width: double.infinity,
             child: AppButton(
               label: 'Save Changes',
-              onTap: _saveChanges,
+              onTap: _saveAction == null ? _saveChanges : null,
+              loading: _saveAction == _SaveAction.changes,
             ),
           ),
         ),
@@ -1108,6 +1176,7 @@ class _DiscountSheet extends StatefulWidget {
 class _DiscountSheetState extends State<_DiscountSheet> {
   late final TextEditingController _ctrl;
   late bool _isPercent;
+  String? _error;
 
   @override
   void initState() {
@@ -1133,6 +1202,18 @@ class _DiscountSheetState extends State<_DiscountSheet> {
 
   void _save() {
     final value = _value;
+    if (!value.isFinite || value < 0) {
+      setState(() => _error = 'Enter a valid discount');
+      return;
+    }
+    if (_isPercent && value > 100) {
+      setState(() => _error = 'Discount cannot exceed 100%');
+      return;
+    }
+    if (!_isPercent && value > kMaxInvoiceAmount) {
+      setState(() => _error = 'Discount amount is too large');
+      return;
+    }
     Navigator.pop(
       context,
       _DiscountResult(value <= 0 ? 0 : value, value <= 0 ? false : _isPercent),
@@ -1176,8 +1257,10 @@ class _DiscountSheetState extends State<_DiscountSheet> {
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [
+                LengthLimitingTextInputFormatter(24),
                 FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
               ],
+              onChanged: (_) => setState(() => _error = null),
               style: TextStyle(color: T.text(context), fontSize: 15),
               decoration: InputDecoration(
                 prefixText: _isPercent ? null : '₹ ',
@@ -1185,6 +1268,17 @@ class _DiscountSheetState extends State<_DiscountSheet> {
                 hintText: _isPercent ? '10' : '500',
               ),
             ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: const TextStyle(
+                  color: C.overdue,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
             const SizedBox(height: 18),
             Row(
               children: [
@@ -1215,7 +1309,10 @@ class _DiscountSheetState extends State<_DiscountSheet> {
     return Expanded(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => setState(() => _isPercent = percent),
+        onTap: () => setState(() {
+          _isPercent = percent;
+          _error = null;
+        }),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           curve: kSmooth,
@@ -1394,8 +1491,12 @@ class _ClientPickerPageState extends State<_ClientPickerPage> {
       slideRoute(const ClientFormPage()),
     );
     if (c == null || c.name.trim().isEmpty) return;
-    await Store.i.saveClient(c);
-    if (mounted) Navigator.pop(context, c);
+    try {
+      await Store.i.saveClient(c);
+      if (mounted) Navigator.pop(context, c);
+    } catch (_) {
+      if (mounted) showAppSnack(context, "Couldn't save this client");
+    }
   }
 
   Future<void> _editClient(Customer client) async {
@@ -1404,8 +1505,12 @@ class _ClientPickerPageState extends State<_ClientPickerPage> {
       slideRoute(ClientFormPage(client: client)),
     );
     if (updated == null || updated.name.trim().isEmpty) return;
-    await Store.i.updateClient(client, updated);
-    if (mounted) Navigator.pop(context, updated);
+    try {
+      await Store.i.updateClient(client, updated);
+      if (mounted) Navigator.pop(context, updated);
+    } catch (_) {
+      if (mounted) showAppSnack(context, "Couldn't update this client");
+    }
   }
 
   @override
@@ -1731,7 +1836,9 @@ class _AddItemPageState extends State<_AddItemPage> {
   double get _subtotal {
     final q = _numberValue(_qtyC.text);
     final r = _numberValue(_rateC.text);
-    return q * r;
+    final value = q * r;
+    if (!value.isFinite || value <= 0) return 0;
+    return value > kMaxInvoiceAmount ? kMaxInvoiceAmount : value;
   }
 
   List<SavedItem> get _suggestions {
@@ -1995,6 +2102,7 @@ class _AddItemPageState extends State<_AddItemPage> {
                         decimal: true,
                       ),
                       inputFormatters: [
+                        LengthLimitingTextInputFormatter(18),
                         FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                       ],
                       style: TextStyle(color: T.text(context), fontSize: 14),
@@ -2034,6 +2142,7 @@ class _AddItemPageState extends State<_AddItemPage> {
                         decimal: true,
                       ),
                       inputFormatters: [
+                        LengthLimitingTextInputFormatter(24),
                         FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                       ],
                       style: TextStyle(color: T.text(context), fontSize: 14),
@@ -2105,8 +2214,17 @@ class _AddItemPageState extends State<_AddItemPage> {
                 showAppSnack(context, 'Quantity must be above zero');
                 return;
               }
-              if (r < 0) {
-                showAppSnack(context, 'Rate cannot be negative');
+              if (q > kMaxInvoiceQuantity) {
+                showAppSnack(context, 'Quantity is too large');
+                return;
+              }
+              if (r < 0 || r > kMaxInvoiceAmount) {
+                showAppSnack(context, 'Enter a valid item rate');
+                return;
+              }
+              final lineTotal = q * r;
+              if (!lineTotal.isFinite || lineTotal > kMaxInvoiceAmount) {
+                showAppSnack(context, 'Item amount is too large');
                 return;
               }
               if (gst < 0 || gst > 100) {
@@ -2116,6 +2234,10 @@ class _AddItemPageState extends State<_AddItemPage> {
               if (!_isValidUnit(_unitC.text)) {
                 showAppSnack(
                     context, 'Choose a unit or use a short custom one');
+                return;
+              }
+              if (!isValidHsnSac(_hsnC.text)) {
+                showAppSnack(context, 'Use a 4, 6 or 8 digit HSN/SAC');
                 return;
               }
               Navigator.pop(
@@ -2272,10 +2394,9 @@ class _AddItemPageState extends State<_AddItemPage> {
                   const SizedBox(height: 8),
                   TextField(
                     controller: _hsnC,
-                    keyboardType: TextInputType.text,
-                    textCapitalization: TextCapitalization.characters,
+                    keyboardType: TextInputType.number,
                     inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
+                      FilteringTextInputFormatter.digitsOnly,
                       LengthLimitingTextInputFormatter(8),
                     ],
                     style: TextStyle(color: T.text(context), fontSize: 14),
@@ -2749,13 +2870,16 @@ class _PostInvoiceSheetState extends State<_PostInvoiceSheet>
   late Animation<double> _checkScale, _contentFade;
   late Animation<Offset> _contentSlide;
   bool _sharing = false;
+  bool _previewing = false;
 
   @override
   void initState() {
     super.initState();
     _ac = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 700),
+      duration: Prefs.reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 700),
     );
     _checkScale = Tween(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
@@ -2799,11 +2923,16 @@ class _PostInvoiceSheetState extends State<_PostInvoiceSheet>
   }
 
   Future<void> _pdf() async {
-    if (!mounted) return;
-    await Navigator.push(
-      context,
-      slideRoute(PdfPreviewPage(invoice: widget.inv)),
-    );
+    if (!mounted || _previewing) return;
+    setState(() => _previewing = true);
+    try {
+      await Navigator.push(
+        context,
+        slideRoute(PdfPreviewPage(invoice: widget.inv)),
+      );
+    } finally {
+      if (mounted) setState(() => _previewing = false);
+    }
   }
 
   @override
@@ -2821,146 +2950,150 @@ class _PostInvoiceSheetState extends State<_PostInvoiceSheet>
         top: 8,
         bottom: MediaQuery.of(context).viewInsets.bottom + 32,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 32,
-            height: 3,
-            margin: const EdgeInsets.only(bottom: 20),
-            decoration: BoxDecoration(
-              color: T.border(context),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          ScaleTransition(
-            scale: _checkScale,
-            child: Container(
-              width: 68,
-              height: 68,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 32,
+              height: 3,
+              margin: const EdgeInsets.only(bottom: 20),
               decoration: BoxDecoration(
-                color: T.inverse(context),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.check_rounded,
-                color: T.onInverse(context),
-                size: 32,
+                color: T.border(context),
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          FadeTransition(
-            opacity: _contentFade,
-            child: SlideTransition(
-              position: _contentSlide,
-              child: Column(
-                children: [
-                  Text(
-                    'Invoice created',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: T.text(context),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${inv.num}  ·  ${inv.client.name.isNotEmpty ? inv.client.name : "No client"}',
-                    style: TextStyle(fontSize: 13, color: T.muted(context)),
-                  ),
-                  const SizedBox(height: 20),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: T.card(context),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: T.border(context), width: 0.5),
-                    ),
-                    child: Column(
-                      children: [
-                        _pRow(
-                          'Items',
-                          inv.items.length == 1
-                              ? inv.items[0].desc
-                              : '${inv.items.length} items',
-                        ),
-                        const SizedBox(height: 6),
-                        _pRow(
-                          'Due in',
-                          inv.termDays == 0 ? 'Today' : '${inv.termDays}d',
-                        ),
-                        Divider(height: 16, color: T.divider(context)),
-                        Row(
-                          children: [
-                            Expanded(
-                              flex: 3,
-                              child: Text(
-                                'Total',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: T.text(context),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              flex: 2,
-                              child: Text(
-                                amtUi(inv.total),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.right,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  color: T.text(context),
-                                  letterSpacing: 0,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: AppButton(
-                      label: 'Share invoice',
-                      icon: Icons.share_rounded,
-                      loading: _sharing,
-                      onTap: _sharing ? null : _share,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: AppButton(
-                      label: 'Preview PDF',
-                      icon: Icons.visibility_outlined,
-                      onTap: _pdf,
-                      tone: AppButtonTone.secondary,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: AppButton(
-                      label: 'Done',
-                      onTap: () => Navigator.pop(context),
-                      tone: AppButtonTone.ghost,
-                      height: 46,
-                    ),
-                  ),
-                ],
+            ScaleTransition(
+              scale: _checkScale,
+              child: Container(
+                width: 68,
+                height: 68,
+                decoration: BoxDecoration(
+                  color: T.inverse(context),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.check_rounded,
+                  color: T.onInverse(context),
+                  size: 32,
+                ),
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            FadeTransition(
+              opacity: _contentFade,
+              child: SlideTransition(
+                position: _contentSlide,
+                child: Column(
+                  children: [
+                    Text(
+                      'Invoice created',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                        color: T.text(context),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${inv.displayNumber}  ·  ${inv.client.name.isNotEmpty ? inv.client.name : "No client"}',
+                      style: TextStyle(fontSize: 13, color: T.muted(context)),
+                    ),
+                    const SizedBox(height: 20),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: T.card(context),
+                        borderRadius: BorderRadius.circular(12),
+                        border:
+                            Border.all(color: T.border(context), width: 0.5),
+                      ),
+                      child: Column(
+                        children: [
+                          _pRow(
+                            'Items',
+                            inv.items.length == 1
+                                ? inv.items[0].desc
+                                : '${inv.items.length} items',
+                          ),
+                          const SizedBox(height: 6),
+                          _pRow(
+                            'Due in',
+                            inv.termDays == 0 ? 'Today' : '${inv.termDays}d',
+                          ),
+                          Divider(height: 16, color: T.divider(context)),
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Text(
+                                  'Total',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: T.text(context),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  amtUi(inv.total),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.right,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: T.text(context),
+                                    letterSpacing: 0,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: AppButton(
+                        label: 'Share invoice',
+                        icon: Icons.share_rounded,
+                        loading: _sharing,
+                        onTap: _sharing ? null : _share,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: AppButton(
+                        label: 'Preview PDF',
+                        icon: Icons.visibility_outlined,
+                        loading: _previewing,
+                        onTap: _previewing ? null : _pdf,
+                        tone: AppButtonTone.secondary,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: AppButton(
+                        label: 'Done',
+                        onTap: () => Navigator.pop(context),
+                        tone: AppButtonTone.ghost,
+                        height: 46,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

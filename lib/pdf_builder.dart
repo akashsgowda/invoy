@@ -173,7 +173,17 @@ Future<Uint8List> buildPdf(Invoice inv) async {
     return doc.save();
   }
 
-  throw StateError('Unsupported invoice template: ${tpl.name}');
+  // Fallback to Minimal
+  doc.addPage(
+    pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.fromLTRB(42, 40, 42, 28),
+      theme: theme,
+      build: (_) => _minimalLayout(inv, sender, regular, bold, primary, accent),
+      footer: (context) => _documentFooter(context, inv, regular, bold),
+    ),
+  );
+  return doc.save();
 }
 
 Future<Uint8List> buildReceiptPdf(Invoice inv) async {
@@ -243,7 +253,7 @@ Future<Uint8List> buildReceiptPdf(Invoice inv) async {
                   ),
                   pw.SizedBox(height: 5),
                   pw.Text(
-                    inv.num,
+                    inv.displayNumber,
                     style: pw.TextStyle(
                       font: regular,
                       fontSize: 10,
@@ -282,7 +292,7 @@ Future<Uint8List> buildReceiptPdf(Invoice inv) async {
                 child: _gstBox(
                   'Against invoice',
                   [
-                    'Invoice no: ${inv.num}',
+                    'Invoice no: ${inv.displayNumber}',
                     'Invoice date: ${fDate(inv.date)}',
                     'Invoice total: ${_pdfAmt(inv.total)}',
                     'Paid so far: ${_pdfAmt(inv.paidAmt)}',
@@ -414,7 +424,12 @@ List<pw.Widget> _gstInvoiceLayout(
         child: pw.Row(
           children: [
             pw.Expanded(
-                child: _inlineMeta('Invoice no', inv.num, regular, bold)),
+                child: _inlineMeta(
+              'Invoice no',
+              inv.displayNumber,
+              regular,
+              bold,
+            )),
             pw.Expanded(
               child:
                   _inlineMeta('Invoice date', fDate(inv.date), regular, bold),
@@ -640,8 +655,12 @@ pw.Widget _gstItemTable(Invoice inv, pw.Font regular, pw.Font bold) {
         ...inv.items.map((item) {
           final taxable = inv.taxableFor(item);
           final tax = inv.taxFor(item);
-          final cgst = inv.splitGst ? tax / 2 : 0.0;
-          final tax2 = inv.splitGst ? tax / 2 : tax;
+          final cgst = inv.splitGst
+              ? double.parse((tax / 2).toStringAsFixed(2))
+              : 0.0;
+          final tax2 = inv.splitGst
+              ? double.parse((tax - cgst).toStringAsFixed(2))
+              : tax;
           final lineTotal = taxable + tax;
           return pw.TableRow(
             children: [
@@ -888,7 +907,7 @@ List<pw.Widget> _minimalLayout(
               ),
               pw.SizedBox(height: 4),
               pw.Text(
-                inv.num,
+                inv.displayNumber,
                 style: pw.TextStyle(
                   font: regular,
                   fontSize: 10,
@@ -1272,7 +1291,7 @@ pw.Widget _invoiceMetaList(
 ) =>
     pw.Column(
       children: [
-        _metaRow('Invoice no', inv.num, regular, bold),
+        _metaRow('Invoice no', inv.displayNumber, regular, bold),
         pw.SizedBox(height: 7),
         _metaRow('Issue date', fDate(inv.date), regular, bold),
         pw.SizedBox(height: 7),
@@ -1355,7 +1374,12 @@ pw.Widget _invoiceMetaStrip(
       child: pw.Row(
         children: [
           pw.Expanded(
-            child: _inlineMeta('Invoice no', inv.num, regular, bold),
+            child: _inlineMeta(
+              'Invoice no',
+              inv.displayNumber,
+              regular,
+              bold,
+            ),
           ),
           pw.Expanded(
             child: _inlineMeta('Issue date', fDate(inv.date), regular, bold),
@@ -1841,7 +1865,7 @@ pw.Widget _compactInvoiceMeta(
         1: pw.FlexColumnWidth(),
       },
       children: [
-        _compactMetaRow('Invoice no', inv.num, regular, bold),
+        _compactMetaRow('Invoice no', inv.displayNumber, regular, bold),
         _compactMetaRow('Date', fDate(inv.date), regular, bold),
         _compactMetaRow('Due date', fDate(inv.due), regular, bold),
       ],
@@ -2107,7 +2131,7 @@ pw.Widget _documentFooter(
         children: [
           pw.Expanded(
             child: pw.Text(
-              '${inv.num} - ${fDate(inv.date)}',
+              '${inv.displayNumber} - ${fDate(inv.date)}',
               style: pw.TextStyle(
                 font: regular,
                 fontSize: compact ? 7 : 7.5,
@@ -2418,6 +2442,7 @@ String? upiPaymentUriForInvoice(Invoice inv) {
   final upi = Prefs.upiId.value.trim();
   if (upi.isEmpty ||
       !isValidUpiId(upi) ||
+      inv.displayStatus == Status.draft ||
       inv.items.isEmpty ||
       inv.balance <= 0) {
     return null;
@@ -2433,7 +2458,7 @@ String? upiPaymentUriForInvoice(Invoice inv) {
       if (payee.isNotEmpty) 'pn': payee,
       'am': inv.balance.toStringAsFixed(2),
       'cu': 'INR',
-      'tn': inv.num,
+      'tn': inv.displayNumber,
     },
   ).toString();
 }
@@ -2445,7 +2470,10 @@ pw.Widget _upiQrBlock(
   double size = 68,
   bool compact = false,
 }) {
-  if (!Prefs.showUpiQr || inv.items.isEmpty || inv.balance <= 0) {
+  if (!Prefs.showUpiQr ||
+      inv.displayStatus == Status.draft ||
+      inv.items.isEmpty ||
+      inv.balance <= 0) {
     return pw.SizedBox();
   }
   final uploaded = _uploadedUpiQrImage();
@@ -2525,7 +2553,7 @@ pw.MemoryImage? _uploadedUpiQrImage() {
   if (data.isEmpty) return null;
   try {
     final bytes = base64Decode(data);
-    if (!_isSupportedImage(bytes)) return null;
+    if (!isSupportedRasterImage(bytes)) return null;
     return pw.MemoryImage(bytes);
   } catch (_) {
     return null;
@@ -2537,43 +2565,11 @@ pw.MemoryImage? _uploadedSignatureImage() {
   if (data.isEmpty) return null;
   try {
     final bytes = base64Decode(data);
-    if (!_isSupportedImage(bytes)) return null;
+    if (!isSupportedRasterImage(bytes)) return null;
     return pw.MemoryImage(bytes);
   } catch (_) {
     return null;
   }
-}
-
-bool _isSupportedImage(List<int> bytes) {
-  if (bytes.length >= 8 &&
-      bytes[0] == 0x89 &&
-      bytes[1] == 0x50 &&
-      bytes[2] == 0x4E &&
-      bytes[3] == 0x47 &&
-      bytes[4] == 0x0D &&
-      bytes[5] == 0x0A &&
-      bytes[6] == 0x1A &&
-      bytes[7] == 0x0A) {
-    return true;
-  }
-  if (bytes.length >= 3 &&
-      bytes[0] == 0xFF &&
-      bytes[1] == 0xD8 &&
-      bytes[2] == 0xFF) {
-    return true;
-  }
-  if (bytes.length >= 12 &&
-      bytes[0] == 0x52 &&
-      bytes[1] == 0x49 &&
-      bytes[2] == 0x46 &&
-      bytes[3] == 0x46 &&
-      bytes[8] == 0x57 &&
-      bytes[9] == 0x45 &&
-      bytes[10] == 0x42 &&
-      bytes[11] == 0x50) {
-    return true;
-  }
-  return false;
 }
 
 pw.Widget _totalRow(
@@ -2610,7 +2606,8 @@ pw.Widget _totalRow(
 
 Future<void> sharePdf(Invoice inv) async {
   final bytes = await buildPdf(inv).timeout(const Duration(seconds: 10));
-  final filename = '${inv.num.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}.pdf';
+  final filename =
+      '${inv.displayNumber.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}.pdf';
   await Printing.sharePdf(
     bytes: bytes,
     filename: filename,
@@ -2620,7 +2617,7 @@ Future<void> sharePdf(Invoice inv) async {
 Future<void> shareReceiptPdf(Invoice inv) async {
   final bytes = await buildReceiptPdf(inv).timeout(const Duration(seconds: 10));
   final filename =
-      '${inv.num.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}_receipt.pdf';
+      '${inv.displayNumber.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}_receipt.pdf';
   await Printing.sharePdf(
     bytes: bytes,
     filename: filename,
@@ -2634,7 +2631,7 @@ Future<void> shareWhatsApp(BuildContext context, Invoice inv) async {
   final clientName = inv.client.name.isNotEmpty ? inv.client.name : 'there';
   final dueText = inv.termDays == 0 ? 'today' : 'in ${inv.termDays} days';
   final message = 'Hi $clientName,\n\n'
-      'Please find your invoice *${inv.num}* for *${amt(inv.total)}*, '
+      'Please find your invoice *${inv.displayNumber}* for *${amt(inv.total)}*, '
       'due $dueText.\n\n'
       '${inv.notes.isNotEmpty ? '${inv.notes}\n\n' : ''}'
       'Thank you.';
@@ -2687,5 +2684,5 @@ Future<String?> savePdfBytes(Uint8List bytes, String invoiceNumber) async {
 
 Future<String?> downloadPdf(Invoice inv) async {
   final bytes = await buildPdf(inv);
-  return savePdfBytes(bytes, inv.num);
+  return savePdfBytes(bytes, inv.displayNumber);
 }

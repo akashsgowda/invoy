@@ -47,13 +47,19 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
         .toList();
   }
 
-  double get _totalInvoiced => _invoices.fold(0, (s, i) => s + i.total);
+  List<Invoice> get _issuedInvoices => _invoices
+      .where((invoice) => invoice.displayStatus != Status.draft)
+      .toList();
 
-  double get _totalRevenue => _invoices.fold(0, (s, i) => s + i.collectedAmt);
+  double get _totalInvoiced =>
+      _issuedInvoices.fold(0, (sum, invoice) => sum + invoice.total);
 
-  double get _outstanding => _invoices
-      .where((i) => i.displayStatus != Status.paid)
-      .fold(0, (s, i) => s + i.balance);
+  double get _totalRevenue =>
+      _issuedInvoices.fold(0, (sum, invoice) => sum + invoice.collectedAmt);
+
+  double get _outstanding => _issuedInvoices
+      .where((invoice) => invoice.displayStatus != Status.paid)
+      .fold(0, (sum, invoice) => sum + invoice.balance);
 
   String get _initials {
     final parts =
@@ -100,11 +106,15 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     );
     if (!mounted) return;
     if (updated == null || updated.name.trim().isEmpty) return;
-    await Store.i.updateClient(oldClient, updated);
-    if (!mounted) return;
-    widget.onRefresh();
-    setState(() => _client = updated.copy());
-    showAppSnack(context, 'Client updated');
+    try {
+      await Store.i.updateClient(oldClient, updated);
+      if (!mounted) return;
+      widget.onRefresh();
+      setState(() => _client = updated.copy());
+      showAppSnack(context, 'Client updated');
+    } catch (_) {
+      if (mounted) showAppSnack(context, "Couldn't update this client");
+    }
   }
 
   Future<void> _deleteClient() async {
@@ -146,14 +156,18 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     );
     if (!mounted) return;
     if (confirm != true) return;
-    await Store.i.deleteClient(_client);
-    if (!mounted) return;
-    widget.onRefresh();
-    final messenger = ScaffoldMessenger.of(context);
-    final snack = appSnackBar(context, 'Client deleted');
-    Navigator.pop(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(snack);
+    try {
+      await Store.i.deleteClient(_client);
+      if (!mounted) return;
+      widget.onRefresh();
+      final messenger = ScaffoldMessenger.of(context);
+      final snack = appSnackBar(context, 'Client deleted');
+      Navigator.pop(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(snack);
+    } catch (_) {
+      if (mounted) showAppSnack(context, "Couldn't delete this client");
+    }
   }
 
   @override
@@ -370,7 +384,9 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                             DetailPage(
                               invoice: inv,
                               onRefresh: () {
-                                if (mounted) setState(() {});
+                                if (!mounted) return;
+                                setState(() {});
+                                widget.onRefresh();
                               },
                             ),
                           ),
@@ -388,7 +404,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      inv.num,
+                                      inv.displayNumber,
                                       style: TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w600,
@@ -485,7 +501,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                 const SizedBox(width: 10),
                 Flexible(
                   child: Text(
-                    '${_invoices.length} invoice${_invoices.length == 1 ? '' : 's'}',
+                    '${_issuedInvoices.length} issued',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.right,

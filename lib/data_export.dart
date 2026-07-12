@@ -30,33 +30,19 @@ class BackupPreview {
 }
 
 Future<File> _writeExportFile(String filename, String content) async {
-  final candidates = <Directory>[];
+  final dir = await getTemporaryDirectory();
+  if (!await dir.exists()) await dir.create(recursive: true);
+  return File('${dir.path}/$filename').writeAsString(content, flush: true);
+}
 
-  if (Platform.isAndroid) {
-    candidates.add(Directory('/storage/emulated/0/Download'));
-    final external = await getExternalStorageDirectory();
-    if (external != null) candidates.add(external);
-  } else {
-    final downloads = await getDownloadsDirectory();
-    if (downloads != null) candidates.add(downloads);
-  }
-
-  candidates.add(await getApplicationDocumentsDirectory());
-
-  Object? lastError;
-  for (final dir in candidates) {
-    try {
-      if (!await dir.exists()) {
-        await dir.create(recursive: true);
-      }
-      final file = File('${dir.path}/$filename');
-      return file.writeAsString(content, flush: true);
-    } catch (e) {
-      lastError = e;
-    }
-  }
-
-  throw FileSystemException('Unable to save export', lastError?.toString());
+Future<String?> _savePreparedFile(File file, String extension) async {
+  return FilePicker.saveFile(
+    dialogTitle: 'Save ${file.uri.pathSegments.last}',
+    fileName: file.uri.pathSegments.last,
+    type: FileType.custom,
+    allowedExtensions: [extension],
+    bytes: await file.readAsBytes(),
+  );
 }
 
 String _safeCell(Object? value) {
@@ -83,7 +69,7 @@ Future<File> createInvoicesCsvFile() async {
     ],
     ...Store.i.all.map(
       (inv) => [
-        inv.num,
+        inv.displayNumber,
         fDate(inv.date),
         inv.clientDisplay,
         inv.statusLabel,
@@ -123,9 +109,13 @@ Future<File> createGstSummaryCsvFile() async {
       'Invoice Total',
       'Status',
     ],
-    ...Store.i.all.where((inv) => inv.gst > 0).map(
+    ...Store.i.all
+        .where(
+          (inv) => inv.gst > 0 && inv.displayStatus != Status.draft,
+        )
+        .map(
           (inv) => [
-            inv.num,
+            inv.displayNumber,
             fDate(inv.date),
             inv.clientDisplay,
             inv.client.gstin,
@@ -194,19 +184,19 @@ Future<File> createBackupJsonFile({DateTime? backedUpAt}) async {
   );
 }
 
-Future<String> exportInvoicesCsv() async {
+Future<String?> exportInvoicesCsv() async {
   final file = await createInvoicesCsvFile();
-  return file.path;
+  return _savePreparedFile(file, 'csv');
 }
 
-Future<String> exportBackupJson({DateTime? backedUpAt}) async {
+Future<String?> exportBackupJson({DateTime? backedUpAt}) async {
   final file = await createBackupJsonFile(backedUpAt: backedUpAt);
-  return file.path;
+  return _savePreparedFile(file, 'json');
 }
 
-Future<String> exportGstSummaryCsv() async {
+Future<String?> exportGstSummaryCsv() async {
   final file = await createGstSummaryCsvFile();
-  return file.path;
+  return _savePreparedFile(file, 'csv');
 }
 
 Future<String> shareInvoicesCsv() async {
@@ -236,6 +226,10 @@ Future<BackupPreview?> pickBackupPreview() async {
   if (result == null || result.files.isEmpty) return null;
 
   final file = result.files.single;
+  const maxBackupBytes = 50 * 1024 * 1024;
+  if (file.size > maxBackupBytes) {
+    throw const FormatException('Backup file is too large');
+  }
   final path = file.path ?? file.name;
   final content = file.bytes != null
       ? utf8.decode(file.bytes!)
@@ -251,6 +245,14 @@ BackupPreview parseBackupJson(String content, {String path = ''}) {
     throw const FormatException('Backup file is not valid JSON');
   }
   final root = Map<String, dynamic>.from(decoded);
+  final app = root['app']?.toString();
+  if (app != null && app != 'Invoy') {
+    throw const FormatException('Backup belongs to another app');
+  }
+  final version = int.tryParse(root['version']?.toString() ?? '1');
+  if (version == null || version < 1 || version > 1) {
+    throw const FormatException('Backup version is not supported');
+  }
   final invoicesRaw = root['invoices'];
   final clientsRaw = root['clients'];
   final savedItemsRaw = root['savedItems'];
@@ -275,8 +277,12 @@ BackupPreview parseBackupJson(String content, {String path = ''}) {
     }
     return Invoice.fromMap(map);
   }).toList();
+  final invoiceIds = <String>{};
   final invoiceNumbers = <String>{};
   for (final invoice in invoices) {
+    if (invoice.id.trim().isEmpty || !invoiceIds.add(invoice.id)) {
+      throw const FormatException('Backup contains duplicate invoice IDs');
+    }
     final number = invoice.num.trim().toUpperCase();
     if (number.isNotEmpty && !invoiceNumbers.add(number)) {
       throw const FormatException('Backup contains duplicate invoice numbers');

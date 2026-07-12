@@ -62,6 +62,10 @@ class _ProfilePageState extends State<ProfilePage> {
       return;
     }
     if (_gstC.text.trim().isNotEmpty) {
+      if (_bizC.text.trim().isEmpty) {
+        showAppSnack(context, 'Add the registered business name');
+        return;
+      }
       if (_bizAddressC.text.trim().isEmpty) {
         showAppSnack(context, 'Add the registered business address');
         return;
@@ -139,6 +143,11 @@ class _ProfilePageState extends State<ProfilePage> {
       showAppSnack(context, 'Choose a smaller QR image');
       return;
     }
+    if (!isSupportedRasterImage(bytes)) {
+      if (!mounted) return;
+      showAppSnack(context, 'Choose a valid PNG, JPG or WebP image');
+      return;
+    }
 
     await Prefs.setUpiQrImage(base64Encode(bytes), file.name);
     if (!mounted) return;
@@ -163,7 +172,10 @@ class _ProfilePageState extends State<ProfilePage> {
     final file = result.files.single;
     final bytes = file.bytes ??
         (file.path == null ? null : await File(file.path!).readAsBytes());
-    if (bytes == null || bytes.isEmpty || bytes.length > 2 * 1024 * 1024) {
+    if (bytes == null ||
+        bytes.isEmpty ||
+        bytes.length > 2 * 1024 * 1024 ||
+        !isSupportedRasterImage(bytes)) {
       if (!mounted) return;
       showAppSnack(context, 'Choose a signature image under 2 MB');
       return;
@@ -310,7 +322,16 @@ class _ProfilePageState extends State<ProfilePage> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: T.border(context), width: 0.5),
         ),
-        child: Image.memory(bytes, fit: BoxFit.contain),
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => Center(
+            child: Text(
+              'Preview unavailable',
+              style: TextStyle(fontSize: 12, color: T.muted(context)),
+            ),
+          ),
+        ),
       );
     } catch (_) {
       return Text(
@@ -365,19 +386,36 @@ class _ProfilePageState extends State<ProfilePage> {
           // ── Business ──
           _sLabel('Business'),
           _block([
-            _field('Your name', _nameC, Prefs.yourName.value),
-            _field('Business name', _bizC, Prefs.bizName.value),
+            _field(
+              'Your name',
+              _nameC,
+              Prefs.yourName.value,
+              inputFormatters: [LengthLimitingTextInputFormatter(100)],
+              capitalization: TextCapitalization.words,
+            ),
+            _field(
+              'Business name',
+              _bizC,
+              Prefs.bizName.value,
+              inputFormatters: [LengthLimitingTextInputFormatter(120)],
+              capitalization: TextCapitalization.words,
+            ),
             _field(
               'Business address',
               _bizAddressC,
               Prefs.bizAddress.value,
               hint: 'Not set',
+              inputFormatters: [LengthLimitingTextInputFormatter(500)],
+              capitalization: TextCapitalization.sentences,
+              maxLines: 3,
             ),
             _field(
               'Business state',
               _bizStateC,
               Prefs.bizState.value,
               hint: 'Not set',
+              inputFormatters: [LengthLimitingTextInputFormatter(60)],
+              capitalization: TextCapitalization.words,
             ),
             _field(
               'GSTIN',
@@ -386,7 +424,14 @@ class _ProfilePageState extends State<ProfilePage> {
               hint: 'Not set',
               inputFormatters: gstinInputFormatters,
             ),
-            _field('UPI ID', _upiC, Prefs.upiId.value, hint: 'Not set'),
+            _field(
+              'UPI ID',
+              _upiC,
+              Prefs.upiId.value,
+              hint: 'Not set',
+              inputFormatters: [LengthLimitingTextInputFormatter(321)],
+              keyboardType: TextInputType.emailAddress,
+            ),
             _qrAction(),
             _signatureAction(),
             _field(
@@ -811,7 +856,16 @@ class _ProfilePageState extends State<ProfilePage> {
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: T.border(context), width: 0.5),
           ),
-          child: Image.memory(bytes, fit: BoxFit.contain),
+          child: Image.memory(
+            bytes,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => Center(
+              child: Text(
+                'Preview unavailable',
+                style: TextStyle(fontSize: 12, color: T.muted(context)),
+              ),
+            ),
+          ),
         ),
       );
     } catch (_) {
@@ -888,6 +942,9 @@ class _ProfilePageState extends State<ProfilePage> {
     String value, {
     String? hint,
     List<TextInputFormatter>? inputFormatters,
+    TextCapitalization capitalization = TextCapitalization.none,
+    TextInputType? keyboardType,
+    int maxLines = 1,
     bool last = false,
   }) {
     final empty = value.isEmpty;
@@ -924,6 +981,9 @@ class _ProfilePageState extends State<ProfilePage> {
                       child: TextField(
                         controller: ctrl,
                         inputFormatters: inputFormatters,
+                        textCapitalization: capitalization,
+                        keyboardType: keyboardType,
+                        maxLines: maxLines,
                         style: TextStyle(fontSize: 15, color: T.text(context)),
                         decoration: InputDecoration(
                           hintText: hint ?? label,

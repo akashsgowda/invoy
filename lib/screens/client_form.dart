@@ -46,9 +46,26 @@ class _ClientFormPageState extends State<ClientFormPage> {
   }
 
   void _save() {
-    if (_nameC.text.trim().isEmpty) {
+    final name = _nameC.text.trim();
+    if (name.isEmpty) {
       if (Prefs.haptics) HapticFeedback.mediumImpact();
       showAppSnack(context, 'Enter a client name');
+      return;
+    }
+    final oldName = widget.client?.name.trim().toLowerCase();
+    final duplicate = Store.i.clients.any(
+      (client) =>
+          client.name.trim().toLowerCase() == name.toLowerCase() &&
+          client.name.trim().toLowerCase() != oldName,
+    );
+    if (duplicate) {
+      showAppSnack(context, 'A client with this name already exists');
+      return;
+    }
+    final email = _emailC.text.trim();
+    if (email.isNotEmpty &&
+        !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
+      showAppSnack(context, 'Enter a valid email address');
       return;
     }
     if (!isValidGstin(_gstinC.text)) {
@@ -75,8 +92,8 @@ class _ClientFormPageState extends State<ClientFormPage> {
     Navigator.pop(
       context,
       Customer(
-        name: _nameC.text.trim(),
-        email: _emailC.text.trim(),
+        name: name,
+        email: email,
         phone: _phoneC.text.trim(),
         address: _addrC.text.trim(),
         gstin: gstin,
@@ -120,6 +137,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
               controller: _nameC,
               autofocus: true,
               textCapitalization: TextCapitalization.words,
+              inputFormatters: [LengthLimitingTextInputFormatter(100)],
               style: TextStyle(color: T.text(context), fontSize: 14),
               decoration: _fieldDecoration('Example Studio'),
             ),
@@ -129,6 +147,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
             TextField(
               controller: _emailC,
               keyboardType: TextInputType.emailAddress,
+              inputFormatters: [LengthLimitingTextInputFormatter(254)],
               style: TextStyle(color: T.text(context), fontSize: 14),
               decoration: _fieldDecoration('client@example.com'),
             ),
@@ -144,6 +163,12 @@ class _ClientFormPageState extends State<ClientFormPage> {
                       TextField(
                         controller: _phoneC,
                         keyboardType: TextInputType.phone,
+                        inputFormatters: [
+                          LengthLimitingTextInputFormatter(20),
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9+ ()-]'),
+                          ),
+                        ],
                         style: TextStyle(color: T.text(context), fontSize: 14),
                         decoration: _fieldDecoration('0000000000'),
                       ),
@@ -176,6 +201,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
               controller: _addrC,
               maxLines: 3,
               textCapitalization: TextCapitalization.sentences,
+              inputFormatters: [LengthLimitingTextInputFormatter(500)],
               style: TextStyle(color: T.text(context), fontSize: 14),
               decoration: _fieldDecoration('123 Example Street'),
             ),
@@ -185,6 +211,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
             TextField(
               controller: _stateC,
               textCapitalization: TextCapitalization.words,
+              inputFormatters: [LengthLimitingTextInputFormatter(60)],
               style: TextStyle(color: T.text(context), fontSize: 14),
               decoration: _fieldDecoration('Karnataka'),
             ),

@@ -99,6 +99,33 @@ void main() {
     expect(inv.statusLabel, 'Paid');
   });
 
+  test('legacy paid invoice without payment rows has no balance due', () {
+    final inv = invoiceWithTotal(1000)..status = Status.paid;
+
+    expect(inv.payments, isEmpty);
+    expect(inv.paidAmt, 1000);
+    expect(inv.collectedAmt, 1000);
+    expect(inv.balance, 0);
+    expect(inv.displayStatus, Status.paid);
+  });
+
+  test('money rounding does not leave a paid invoice one paisa open', () {
+    final inv = Invoice(
+      id: 'rounding-test',
+      num: 'INV-ROUND',
+      gst: 0,
+      status: Status.pending,
+      items: [LineItem(id: '1', desc: 'Work', qty: 3, rate: 0.1)],
+      payments: [
+        Payment(amount: 0.3, date: DateTime(2026, 7, 1), mode: PayMode.cash),
+      ],
+    );
+
+    expect(inv.total, 0.3);
+    expect(inv.balance, 0);
+    expect(inv.displayStatus, Status.paid);
+  });
+
   test('invoice discount is applied before tax', () {
     final inv = invoiceWithTotal(1000)
       ..gst = 18
@@ -160,6 +187,20 @@ void main() {
     expect(inv.sgst, 102.5);
     expect(inv.igst, 0);
     expect(inv.total, 1705);
+  });
+
+  test('rounded CGST and SGST always add back to total GST', () {
+    final inv = Invoice(
+      id: 'odd-paisa-tax',
+      num: 'INV-ODD',
+      gst: 18,
+      splitGst: true,
+      items: [LineItem(id: '1', desc: 'Tiny item', qty: 1, rate: 0.06)],
+    );
+
+    expect(inv.tax, 0.01);
+    expect(inv.cgst + inv.sgst, inv.tax);
+    expect(inv.total, 0.07);
   });
 
   test('IGST uses the full tax amount for interstate invoices', () {
@@ -264,6 +305,46 @@ void main() {
     expect(inv.taxRateFor(inv.items.single), 100);
     expect(inv.payments.single.amount, 0);
     expect(inv.termDays, 0);
+  });
+
+  test('extreme imported values remain finite and bounded', () {
+    final inv = Invoice.fromMap({
+      'id': 'huge-import',
+      'num': '',
+      'items':
+          '[{"id":"1","desc":"Huge","qty":"999999999999","rate":"999999999999999999"}]',
+      'payments': '[{"amount":"999999999999999999","date":"0"}]',
+      'invoiceDate': DateTime(2026, 7, 1).millisecondsSinceEpoch,
+      'gst': '100',
+      'status': 'draft',
+    });
+
+    expect(inv.items.single.qty, kMaxInvoiceQuantity);
+    expect(inv.items.single.rate, kMaxInvoiceAmount);
+    expect(inv.total.isFinite, isTrue);
+    expect(inv.total, lessThanOrEqualTo(kMaxInvoiceAmount));
+    expect(inv.balance.isFinite, isTrue);
+    expect(inv.displayNumber, 'Draft');
+  });
+
+  test('line discount shares sum exactly to the invoice discount', () {
+    final inv = Invoice(
+      id: 'discount-rounding',
+      num: 'INV-DISC-ROUND',
+      discountValue: 0.01,
+      items: [
+        LineItem(id: '1', desc: 'One', qty: 1, rate: 0.01),
+        LineItem(id: '2', desc: 'Two', qty: 1, rate: 0.01),
+        LineItem(id: '3', desc: 'Three', qty: 1, rate: 0.01),
+      ],
+    );
+
+    final shares = inv.items.fold(
+      0.0,
+      (sum, item) => sum + inv.discountShareFor(item),
+    );
+    expect(shares, inv.discountAmount);
+    expect(inv.taxableSub, 0.02);
   });
 
   test('generated ids stay unique during tight loops', () {

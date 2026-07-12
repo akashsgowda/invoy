@@ -24,6 +24,9 @@ class DetailPage extends StatefulWidget {
 
 class _DetailPageState extends State<DetailPage> {
   late Invoice _inv;
+  bool _sharing = false;
+  bool _previewing = false;
+  bool _updating = false;
 
   @override
   void initState() {
@@ -38,6 +41,8 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Future<void> _shareInvoice() async {
+    if (_sharing) return;
+    setState(() => _sharing = true);
     try {
       if (!mounted) return;
       _snack('Preparing share sheet');
@@ -45,6 +50,8 @@ class _DetailPageState extends State<DetailPage> {
     } catch (_) {
       if (!mounted) return;
       _snack('Could not open share sheet');
+    } finally {
+      if (mounted) setState(() => _sharing = false);
     }
   }
 
@@ -63,7 +70,13 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Future<void> _pdf() async {
-    await Navigator.push(context, slideRoute(PdfPreviewPage(invoice: _inv)));
+    if (_previewing) return;
+    setState(() => _previewing = true);
+    try {
+      await Navigator.push(context, slideRoute(PdfPreviewPage(invoice: _inv)));
+    } finally {
+      if (mounted) setState(() => _previewing = false);
+    }
   }
 
   Future<void> _shareReminder() async {
@@ -80,38 +93,68 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   Future<void> _dup() async {
-    final newNum = await DB.nextNum(DateTime.now());
-    final d = _inv.duplicate(uid(), newNum);
-    await Store.i.add(d);
-    if (!mounted) return;
-    _r();
-    final messenger = ScaffoldMessenger.of(context);
-    final snack = appSnackBar(context, 'Duplicated as ${d.num}');
-    Navigator.pop(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(snack);
+    if (_updating) return;
+    setState(() => _updating = true);
+    try {
+      final draft = _inv.duplicate(uid(), '');
+      await Store.i.add(draft);
+      if (!mounted) return;
+      _r();
+      final messenger = ScaffoldMessenger.of(context);
+      final snack = appSnackBar(context, 'Draft duplicated');
+      Navigator.pop(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(snack);
+    } catch (_) {
+      if (mounted) _snack("Couldn't duplicate this invoice");
+    } finally {
+      if (mounted) setState(() => _updating = false);
+    }
   }
 
   Future<void> _markPaid() async {
-    if (_inv.items.isEmpty || _inv.balance <= 0) {
+    if (_updating || _inv.items.isEmpty || _inv.balance <= 0) {
       _snack('No balance due');
       return;
     }
-    final remaining = _inv.balance;
-    setState(() {
-      _inv.payments.add(
-        Payment(amount: remaining, date: DateTime.now(), mode: PayMode.upi),
-      );
-      _inv.status = Status.paid;
-    });
-    await Store.i.update(_inv);
+    final payment = await showModalBottomSheet<Payment>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => PaySheet(
+        remaining: _inv.balance,
+        dark: T.dark(context),
+        fullPayment: true,
+      ),
+    );
+    if (!mounted || payment == null) return;
+    await _savePayment(payment, fullPayment: true);
+  }
+
+  Future<void> _editInvoice() async {
+    Invoice? saved;
+    final changed = await Navigator.push<bool>(
+      context,
+      slideRoute(
+        CreatePage(
+          invoice: _inv,
+          editing: true,
+          onSaved: (invoice) async {
+            await Store.i.update(invoice);
+            saved = invoice;
+          },
+        ),
+      ),
+    );
     if (!mounted) return;
-    _r();
-    if (Prefs.haptics) HapticFeedback.mediumImpact();
-    await _showDone('Marked paid');
+    if (changed == true && saved != null) {
+      _inv = saved!;
+      _r();
+    }
   }
 
   Future<void> _markUnpaid() async {
+    if (_updating) return;
     if (_inv.payments.isNotEmpty) {
       final confirm = await showDialog<bool>(
         context: context,
@@ -153,15 +196,26 @@ class _DetailPageState extends State<DetailPage> {
       if (!mounted) return;
       if (confirm != true) return;
     }
+    final oldPayments = _inv.payments.map((entry) => entry.copy()).toList();
+    final oldStatus = _inv.status;
     setState(() {
+      _updating = true;
       _inv.payments.clear();
       _inv.status = Status.pending;
     });
-    await Store.i.update(_inv);
-    if (!mounted) return;
-    _r();
-    if (Prefs.haptics) HapticFeedback.selectionClick();
-    _snack('Marked as unpaid');
+    try {
+      await Store.i.update(_inv);
+      if (!mounted) return;
+      _r();
+      if (Prefs.haptics) HapticFeedback.selectionClick();
+      _snack('Marked as unpaid');
+    } catch (_) {
+      _inv.payments = oldPayments;
+      _inv.status = oldStatus;
+      if (mounted) _snack("Couldn't update this invoice");
+    } finally {
+      if (mounted) setState(() => _updating = false);
+    }
   }
 
   Future<void> _deleteInvoice() async {
@@ -199,14 +253,18 @@ class _DetailPageState extends State<DetailPage> {
     );
     if (!mounted) return;
     if (confirm != true) return;
-    await Store.i.delete(_inv.id);
-    if (!mounted) return;
-    _r();
-    Navigator.pop(context);
+    try {
+      await Store.i.delete(_inv.id);
+      if (!mounted) return;
+      _r();
+      Navigator.pop(context);
+    } catch (_) {
+      if (mounted) _snack("Couldn't delete this invoice");
+    }
   }
 
   Future<void> _recordPayment() async {
-    if (_inv.items.isEmpty || _inv.balance <= 0) {
+    if (_updating || _inv.items.isEmpty || _inv.balance <= 0) {
       _snack('No balance due');
       return;
     }
@@ -216,21 +274,38 @@ class _DetailPageState extends State<DetailPage> {
       backgroundColor: Colors.transparent,
       builder: (_) => PaySheet(remaining: _inv.balance, dark: T.dark(context)),
     );
-    if (p != null) {
-      if (!mounted) return;
-      setState(() {
-        _inv.payments.add(p);
-        if (_inv.balance <= 0) _inv.status = Status.paid;
-      });
+    if (!mounted || p == null) return;
+    await _savePayment(p, fullPayment: false);
+  }
+
+  Future<void> _savePayment(
+    Payment payment, {
+    required bool fullPayment,
+  }) async {
+    if (_updating) return;
+    final oldPayments = _inv.payments.map((entry) => entry.copy()).toList();
+    final oldStatus = _inv.status;
+    setState(() {
+      _updating = true;
+      _inv.payments.add(payment);
+      if (_inv.balance <= 0) _inv.status = Status.paid;
+    });
+    try {
       await Store.i.update(_inv);
       if (!mounted) return;
       _r();
-      if (mounted && _inv.displayStatus == Status.paid) {
+      if (_inv.displayStatus == Status.paid) {
         if (Prefs.haptics) HapticFeedback.mediumImpact();
         await _showDone('Marked paid');
       } else {
-        _snack('Payment recorded');
+        _snack(fullPayment ? 'Payment recorded' : 'Partial payment recorded');
       }
+    } catch (_) {
+      _inv.payments = oldPayments;
+      _inv.status = oldStatus;
+      if (mounted) _snack("Couldn't record this payment");
+    } finally {
+      if (mounted) setState(() => _updating = false);
     }
   }
 
@@ -352,11 +427,15 @@ class _DetailPageState extends State<DetailPage> {
           ),
         ),
         title: Tooltip(
-          message: 'Tap to copy invoice number',
+          message: _inv.num.trim().isEmpty
+              ? 'Draft invoice'
+              : 'Tap to copy invoice number',
           child: GestureDetector(
-            onTap: () => _copyValue('Invoice number', _inv.num),
+            onTap: _inv.num.trim().isEmpty
+                ? null
+                : () => _copyValue('Invoice number', _inv.num),
             child: Text(
-              _inv.num,
+              _inv.displayNumber,
               style: TextStyle(
                 color: T.faint(context),
                 fontSize: 13,
@@ -380,25 +459,7 @@ class _DetailPageState extends State<DetailPage> {
             ),
             onSelected: (v) async {
               if (v == 'edit') {
-                Invoice? saved;
-                final changed = await Navigator.push<bool>(
-                  context,
-                  slideRoute(
-                    CreatePage(
-                      invoice: _inv,
-                      editing: true,
-                      onSaved: (inv) async {
-                        await Store.i.update(inv);
-                        saved = inv;
-                      },
-                    ),
-                  ),
-                );
-                if (!mounted) return;
-                if (changed == true && saved != null) {
-                  _inv = saved!;
-                  _r();
-                }
+                await _editInvoice();
               }
               if (v == 'dup') await _dup();
               if (v == 'remind') await _shareReminder();
@@ -737,10 +798,9 @@ class _DetailPageState extends State<DetailPage> {
   // ── Bottom bar ───────────────────────────────────────────────
 
   Widget _bottomBar(bool isPaid) {
-    final canCollect = !isPaid &&
-        _inv.displayStatus != Status.draft &&
-        _inv.items.isNotEmpty &&
-        _inv.balance > 0;
+    final isDraft = _inv.displayStatus == Status.draft;
+    final canCollect =
+        !isPaid && !isDraft && _inv.items.isNotEmpty && _inv.balance > 0;
     return Container(
       color: T.surface(context),
       child: SafeArea(
@@ -750,38 +810,56 @@ class _DetailPageState extends State<DetailPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Primary: Share invoice
-              SizedBox(
-                width: double.infinity,
-                child: AppButton(
-                  label: 'Share invoice',
-                  icon: Icons.share_rounded,
-                  onTap: _shareInvoice,
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: _bottomOutlineButton(
-                      icon: Icons.visibility_outlined,
-                      label: 'Preview PDF',
-                      onPressed: _pdf,
-                    ),
+              if (isDraft) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: AppButton(
+                    label: 'Continue Draft',
+                    onTap: _updating ? null : _editInvoice,
                   ),
-                  if (canCollect) ...[
-                    const SizedBox(width: 10),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: _bottomOutlineButton(
+                    icon: Icons.visibility_outlined,
+                    label: 'Preview Draft',
+                    onPressed: _pdf,
+                  ),
+                ),
+              ] else ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: AppButton(
+                    label: 'Share invoice',
+                    icon: Icons.share_rounded,
+                    onTap: _sharing ? null : _shareInvoice,
+                    loading: _sharing,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
                     Expanded(
                       child: _bottomOutlineButton(
-                        icon: Icons.account_balance_wallet_outlined,
-                        label: 'Settle invoice',
-                        onPressed: _openSettleInvoice,
+                        icon: Icons.visibility_outlined,
+                        label: 'Preview PDF',
+                        onPressed: _pdf,
                       ),
                     ),
+                    if (canCollect) ...[
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _bottomOutlineButton(
+                          icon: Icons.account_balance_wallet_outlined,
+                          label: 'Settle invoice',
+                          onPressed: _openSettleInvoice,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
+                ),
+              ],
             ],
           ),
         ),

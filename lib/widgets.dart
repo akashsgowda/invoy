@@ -190,8 +190,12 @@ class _SpringTapState extends State<SpringTap>
 
   @override
   Widget build(BuildContext context) => MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
+        onEnter: widget.onTap == null
+            ? null
+            : (_) => setState(() => _hovered = true),
+        onExit: widget.onTap == null
+            ? null
+            : (_) => setState(() => _hovered = false),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapDown: widget.onTap == null ? null : _down,
@@ -334,77 +338,6 @@ class AppSheet extends StatelessWidget {
       );
 }
 
-// ─── Sheet Text Field ────────────────────────────────────────────
-
-class SheetField extends StatelessWidget {
-  final TextEditingController ctrl;
-  final String label, hint;
-  final bool dark;
-  final TextInputType kb;
-  final int lines;
-  final void Function(String)? onChange;
-
-  const SheetField(
-    this.ctrl,
-    this.label,
-    this.hint,
-    this.dark, {
-    super.key,
-    this.kb = TextInputType.text,
-    this.lines = 1,
-    this.onChange,
-  });
-
-  @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: T.faint(context),
-              letterSpacing: 0.2,
-            ),
-          ),
-          const SizedBox(height: 8),
-          _SoftFieldShell(
-            child: TextField(
-              controller: ctrl,
-              keyboardType: kb,
-              maxLines: lines,
-              onChanged: onChange,
-              style: TextStyle(color: T.text(context), fontSize: 15),
-              decoration: InputDecoration(hintText: hint),
-            ),
-          ),
-        ],
-      );
-}
-
-class _SoftFieldShell extends StatelessWidget {
-  final Widget child;
-  const _SoftFieldShell({required this.child});
-
-  @override
-  Widget build(BuildContext context) => DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: T.dark(context)
-              ? const []
-              : const [
-                  BoxShadow(
-                    color: Color(0x08000000),
-                    blurRadius: 16,
-                    offset: Offset(0, 8),
-                  ),
-                ],
-        ),
-        child: child,
-      );
-}
-
 class AppSearchField extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
@@ -501,110 +434,6 @@ class AppSearchField extends StatelessWidget {
                   ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ─── Big Button ──────────────────────────────────────────────────
-
-class BigBtn extends StatefulWidget {
-  final String label;
-  final VoidCallback onTap;
-  final bool dark;
-  final Color? color;
-  final Color? textColor;
-
-  const BigBtn(
-    this.label,
-    this.onTap,
-    this.dark, {
-    super.key,
-    this.color,
-    this.textColor,
-  });
-
-  @override
-  State<BigBtn> createState() => _BigBtnState();
-}
-
-class _BigBtnState extends State<BigBtn> {
-  bool _pressed = false;
-
-  void _down(TapDownDetails _) {
-    if (Prefs.haptics) HapticFeedback.lightImpact();
-    setState(() => _pressed = true);
-  }
-
-  void _up(TapUpDetails _) {
-    setState(() => _pressed = false);
-    widget.onTap();
-  }
-
-  void _cancel() => setState(() => _pressed = false);
-
-  @override
-  Widget build(BuildContext context) {
-    final baseColor = widget.color ?? T.inverse(context);
-    final textColor = widget.textColor ?? T.onInverse(context);
-    return GestureDetector(
-      onTapDown: _down,
-      onTapUp: _up,
-      onTapCancel: _cancel,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedScale(
-        scale: _pressed ? 0.975 : 1.0,
-        duration: Prefs.reduceMotion
-            ? Duration.zero
-            : Duration(milliseconds: _pressed ? 90 : 230),
-        curve: _pressed ? kSmooth : kPop,
-        child: AnimatedContainer(
-          duration: Prefs.reduceMotion
-              ? Duration.zero
-              : const Duration(milliseconds: 150),
-          curve: kSmooth,
-          width: double.infinity,
-          height: 52,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: _pressed ? baseColor.withValues(alpha: 0.90) : baseColor,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: textColor.withValues(alpha: T.dark(context) ? 0.12 : 0.08),
-              width: 0.7,
-            ),
-            boxShadow: _pressed ? const [] : T.buttonShadow(context),
-          ),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        textColor.withValues(alpha: 0.055),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Center(
-                child: Text(
-                  widget.label,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: textColor,
-                    letterSpacing: 0,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -1221,227 +1050,10 @@ class EditSheet extends StatelessWidget {
               decoration: InputDecoration(hintText: hint ?? title),
             ),
             const SizedBox(height: 20),
-            BigBtn(
-                'Save', () => Navigator.pop(context, ctrl.text.trim()), dark),
-          ],
-        ),
-      );
-}
-
-// ─── Client Sheet ────────────────────────────────────────────────
-
-class ClientSheet extends StatefulWidget {
-  final Customer client;
-  final bool dark;
-  const ClientSheet({super.key, required this.client, this.dark = true});
-
-  @override
-  State<ClientSheet> createState() => _ClientSheetState();
-}
-
-class _ClientSheetState extends State<ClientSheet> {
-  late final TextEditingController _nameC, _emailC, _phoneC, _addrC, _gstinC;
-
-  @override
-  void initState() {
-    super.initState();
-    _nameC = TextEditingController(text: widget.client.name);
-    _emailC = TextEditingController(text: widget.client.email);
-    _phoneC = TextEditingController(text: widget.client.phone);
-    _addrC = TextEditingController(text: widget.client.address);
-    _gstinC = TextEditingController(text: widget.client.gstin);
-  }
-
-  @override
-  void dispose() {
-    _nameC.dispose();
-    _emailC.dispose();
-    _phoneC.dispose();
-    _addrC.dispose();
-    _gstinC.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AppSheet(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Client Details',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: T.text(context),
-              ),
+            AppButton(
+              label: 'Save',
+              onTap: () => Navigator.pop(context, ctrl.text.trim()),
             ),
-            const SizedBox(height: 20),
-            SheetField(_nameC, 'Name', 'Example Client', widget.dark),
-            const SizedBox(height: 14),
-            SheetField(
-              _emailC,
-              'Email',
-              'client@example.com',
-              widget.dark,
-              kb: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 14),
-            SheetField(
-              _phoneC,
-              'Phone',
-              '0000000000',
-              widget.dark,
-              kb: TextInputType.phone,
-            ),
-            const SizedBox(height: 14),
-            SheetField(
-              _addrC,
-              'Address',
-              '123 Example Street',
-              widget.dark,
-              lines: 2,
-            ),
-            const SizedBox(height: 14),
-            SheetField(_gstinC, 'GSTIN', '22AAAAA0000A1Z5', widget.dark),
-            const SizedBox(height: 28),
-            BigBtn('Save Client', () {
-              Navigator.pop(
-                context,
-                Customer(
-                  name: _nameC.text.trim(),
-                  email: _emailC.text.trim(),
-                  phone: _phoneC.text.trim(),
-                  address: _addrC.text.trim(),
-                  gstin: _gstinC.text.trim(),
-                ),
-              );
-            }, widget.dark),
-          ],
-        ),
-      );
-}
-
-// ─── Item Sheet ──────────────────────────────────────────────────
-
-class ItemSheet extends StatefulWidget {
-  final bool dark;
-  const ItemSheet({super.key, this.dark = true});
-
-  @override
-  State<ItemSheet> createState() => _ItemSheetState();
-}
-
-class _ItemSheetState extends State<ItemSheet> {
-  final _descC = TextEditingController();
-  final _qtyC = TextEditingController(text: '1');
-  final _rateC = TextEditingController();
-
-  @override
-  void dispose() {
-    _descC.dispose();
-    _qtyC.dispose();
-    _rateC.dispose();
-    super.dispose();
-  }
-
-  double get _total {
-    final q = double.tryParse(_qtyC.text) ?? 0;
-    final r = double.tryParse(_rateC.text.replaceAll(',', '')) ?? 0;
-    return q * r;
-  }
-
-  @override
-  Widget build(BuildContext context) => AppSheet(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Add Item',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: T.text(context),
-              ),
-            ),
-            const SizedBox(height: 20),
-            SheetField(
-              _descC,
-              'Description',
-              'UI/UX Design - Mobile App',
-              widget.dark,
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: SheetField(
-                    _qtyC,
-                    'Qty',
-                    '1',
-                    widget.dark,
-                    kb: TextInputType.number,
-                    onChange: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: SheetField(
-                    _rateC,
-                    'Rate (₹)',
-                    '5000',
-                    widget.dark,
-                    kb: TextInputType.number,
-                    onChange: (_) => setState(() {}),
-                  ),
-                ),
-              ],
-            ),
-            if (_total > 0) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: BoxDecoration(
-                  color: T.subtle(context),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: T.border(context), width: 0.5),
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      'Amount',
-                      style: TextStyle(fontSize: 13, color: T.faint(context)),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        amtUi(_total),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: T.text(context),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            const SizedBox(height: 28),
-            BigBtn('Add Item', () {
-              if (_descC.text.trim().isEmpty) return;
-              final q = double.tryParse(_qtyC.text) ?? 1;
-              final r = double.tryParse(_rateC.text.replaceAll(',', '')) ?? 0;
-              Navigator.pop(
-                context,
-                LineItem(id: uid(), desc: _descC.text.trim(), qty: q, rate: r),
-              );
-            }, widget.dark),
           ],
         ),
       );
@@ -1452,7 +1064,13 @@ class _ItemSheetState extends State<ItemSheet> {
 class PaySheet extends StatefulWidget {
   final double remaining;
   final bool dark;
-  const PaySheet({super.key, required this.remaining, this.dark = true});
+  final bool fullPayment;
+  const PaySheet({
+    super.key,
+    required this.remaining,
+    this.dark = true,
+    this.fullPayment = false,
+  });
 
   @override
   State<PaySheet> createState() => _PaySheetState();
@@ -1481,7 +1099,7 @@ class _PaySheetState extends State<PaySheet> {
       context: context,
       initialDate: _date,
       firstDate: DateTime(2020),
-      lastDate: DateTime(2035),
+      lastDate: DateTime.now(),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: T.dark(context)
@@ -1510,6 +1128,7 @@ class _PaySheetState extends State<PaySheet> {
   }
 
   String get _confirmLabel {
+    if (widget.fullPayment) return 'Mark as paid';
     final amount = _enteredAmount();
     if (amount >= widget.remaining && widget.remaining > 0) {
       return 'Record full payment';
@@ -1524,8 +1143,8 @@ class _PaySheetState extends State<PaySheet> {
   }
 
   void _submit() {
-    final entered = _enteredAmount();
-    if (entered <= 0) {
+    final entered = widget.fullPayment ? widget.remaining : _enteredAmount();
+    if (!entered.isFinite || entered <= 0) {
       setState(() => _error = 'Enter an amount received');
       return;
     }
@@ -1540,7 +1159,7 @@ class _PaySheetState extends State<PaySheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Record payment',
+              widget.fullPayment ? 'Mark as paid' : 'Record payment',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
@@ -1585,58 +1204,70 @@ class _PaySheetState extends State<PaySheet> {
               ),
             ),
             const SizedBox(height: 20),
-            Row(
-              children: [
-                Text(
-                  'Amount received',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: T.faint(context),
-                    letterSpacing: 0.2,
+            if (!widget.fullPayment) ...[
+              Row(
+                children: [
+                  Text(
+                    'Amount received',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: T.faint(context),
+                      letterSpacing: 0.2,
+                    ),
                   ),
-                ),
-                const Spacer(),
-                SpringTap(
-                  onTap: _fillFullBalance,
-                  scale: 0.96,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: T.subtle(context),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: T.border(context), width: 0.5),
-                    ),
-                    child: Text(
-                      'Full balance',
-                      style: TextStyle(
-                        color: T.text(context),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                  const Spacer(),
+                  SpringTap(
+                    onTap: _fillFullBalance,
+                    scale: 0.96,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: T.subtle(context),
+                        borderRadius: BorderRadius.circular(999),
+                        border:
+                            Border.all(color: T.border(context), width: 0.5),
+                      ),
+                      child: Text(
+                        'Full balance',
+                        style: TextStyle(
+                          color: T.text(context),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _amtC,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-              ],
-              onChanged: (_) => setState(() => _error = null),
-              style: TextStyle(color: T.text(context), fontSize: 15),
-              decoration: InputDecoration(
-                prefixText: '₹ ',
-                hintText: _moneyInput(widget.remaining),
+                ],
               ),
-            ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _amtC,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(24),
+                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                ],
+                onChanged: (_) => setState(() => _error = null),
+                style: TextStyle(color: T.text(context), fontSize: 15),
+                decoration: InputDecoration(
+                  prefixText: '₹ ',
+                  hintText: _moneyInput(widget.remaining),
+                ),
+              ),
+            ] else
+              Text(
+                'Choose how and when the full payment was received.',
+                style: TextStyle(
+                  color: T.muted(context),
+                  fontSize: 12,
+                  height: 1.4,
+                ),
+              ),
             if (_error != null) ...[
               const SizedBox(height: 8),
               Text(
@@ -1730,7 +1361,7 @@ class _PaySheetState extends State<PaySheet> {
               }).toList(),
             ),
             const SizedBox(height: 28),
-            BigBtn(_confirmLabel, _submit, widget.dark),
+            AppButton(label: _confirmLabel, onTap: _submit),
           ],
         ),
       );

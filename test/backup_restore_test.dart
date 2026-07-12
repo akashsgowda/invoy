@@ -96,4 +96,31 @@ void main() {
       throwsA(isA<FormatException>()),
     );
   });
+
+  test('backup parser rejects duplicate invoice IDs', () {
+    final first = Invoice(id: 'same', num: 'INV-26-27-001');
+    final second = Invoice(id: 'same', num: 'INV-26-27-002');
+    final content = jsonEncode({
+      'app': 'Invoy',
+      'version': 1,
+      'invoices': [first.toMap(), second.toMap()],
+    });
+
+    expect(() => parseBackupJson(content), throwsFormatException);
+  });
+
+  test('backup parser rejects another app and newer formats', () {
+    expect(
+      () => parseBackupJson(
+        jsonEncode({'app': 'Other', 'version': 1, 'invoices': []}),
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => parseBackupJson(
+        jsonEncode({'app': 'Invoy', 'version': 99, 'invoices': []}),
+      ),
+      throwsFormatException,
+    );
+  });
 }
