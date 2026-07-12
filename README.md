@@ -5,8 +5,8 @@ small businesses and freelancers create invoices, track payment status, manage
 clients, export backups, and generate shareable invoice PDFs.
 
 <p align="center">
-  <a href="https://github.com/akashsgowda/invoy/releases/latest/download/Invoy-v2.1.2.apk">
-    <img src="https://img.shields.io/badge/Download%20APK-Invoy%20v2.1.2-black?style=for-the-badge&logo=android" alt="Download Invoy APK">
+  <a href="https://github.com/akashsgowda/invoy/releases/latest/download/Invoy-v2.1.3.apk">
+    <img src="https://img.shields.io/badge/Download%20APK-Invoy%20v2.1.3-black?style=for-the-badge&logo=android" alt="Download Invoy APK">
   </a>
 </p>
 
@@ -14,7 +14,7 @@ clients, export backups, and generate shareable invoice PDFs.
   <b>Download the latest Android APK from GitHub Releases.</b>
 </p>
 
-**Download:** https://github.com/akashsgowda/invoy/releases/latest/download/Invoy-v2.1.2.apk
+**Download:** https://github.com/akashsgowda/invoy/releases/latest/download/Invoy-v2.1.3.apk
 
 ## Screenshots
 
