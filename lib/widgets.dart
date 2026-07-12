@@ -25,6 +25,12 @@ bool isValidGstin(String value) {
       .hasMatch(raw);
 }
 
+bool isValidUpiId(String value) {
+  final raw = value.trim();
+  if (raw.isEmpty) return true;
+  return RegExp(r'^[A-Za-z0-9._-]{2,256}@[A-Za-z0-9.-]{2,64}$').hasMatch(raw);
+}
+
 class _UpperCaseTextFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(

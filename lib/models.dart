@@ -270,6 +270,8 @@ class Payment {
       );
 }
 
+typedef InvoiceCollection = ({DateTime date, double amount});
+
 class Invoice {
   final String id;
   String num, template, notes, placeOfSupply, deliveryAddress;
@@ -372,12 +374,33 @@ class Invoice {
   double get paidAmt => payments.fold(0, (s, p) => s + p.amount);
   bool get hasPayment => paidAmt > 0;
   bool get isPartPaid => items.isNotEmpty && hasPayment && balance > 0;
-  double get collectedAmt {
-    if (payments.isNotEmpty) {
-      return paidAmt > total ? total : paidAmt;
+
+  List<InvoiceCollection> get collections {
+    if (items.isEmpty || total <= 0) return const <InvoiceCollection>[];
+    if (payments.isEmpty) {
+      return status == Status.paid
+          ? <InvoiceCollection>[(date: date, amount: total)]
+          : const <InvoiceCollection>[];
     }
-    return status == Status.paid ? total : 0;
+
+    final sorted = List<Payment>.from(payments)
+      ..sort((a, b) => a.date.compareTo(b.date));
+    final result = <InvoiceCollection>[];
+    var remaining = total;
+    for (final payment in sorted) {
+      if (remaining <= 0) break;
+      if (payment.amount <= 0) continue;
+      final amount = payment.amount > remaining ? remaining : payment.amount;
+      result.add((date: payment.date, amount: amount));
+      remaining -= amount;
+    }
+    return result;
   }
+
+  double get collectedAmt => collections.fold(
+        0.0,
+        (sum, collection) => sum + collection.amount,
+      );
 
   double get balance {
     final due = total - paidAmt;
@@ -1397,6 +1420,7 @@ class Store {
   double get totalRevenue => _totalRevenue;
   double get totalPending => _totalPending;
   double get totalOverdue => _totalOverdue;
+  bool get isLoaded => _loaded;
 
   Future<Invoice> create() async {
     return Invoice(
