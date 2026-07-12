@@ -32,43 +32,55 @@ class _ClientsPageState extends State<ClientsPage> {
     super.dispose();
   }
 
+  List<_ClientSummary>? _cachedSummary;
+  int _lastStoreAllCount = -1;
+  int _lastStoreClientsCount = -1;
+
   List<_ClientSummary> get _clients {
-    final map = <String, _ClientSummary>{};
+    if (_cachedSummary == null ||
+        _lastStoreAllCount != Store.i.all.length ||
+        _lastStoreClientsCount != Store.i.clients.length) {
+      final map = <String, _ClientSummary>{};
 
-    for (final c in Store.i.clients) {
-      if (c.name.isEmpty) continue;
-      map[c.name.trim().toLowerCase()] = _ClientSummary(
-        name: c.name,
-        email: c.email,
-        phone: c.phone,
-        address: c.address,
-        gstin: c.gstin,
-        state: c.state,
-      );
-    }
-
-    for (final inv in Store.i.all) {
-      if (inv.client.name.isEmpty) continue;
-      final k = inv.client.name.trim().toLowerCase();
-      final s = map.putIfAbsent(
-        k,
-        () => _ClientSummary(
-          name: inv.client.name,
-          email: inv.client.email,
-          phone: inv.client.phone,
-          address: inv.client.address,
-          gstin: inv.client.gstin,
-          state: inv.client.state,
-        ),
-      );
-      s.total++;
-      if (inv.displayStatus == Status.paid) {
-        s.paidCount++;
-      } else if (inv.displayStatus != Status.draft) {
-        s.unpaidAmt += inv.balance;
+      for (final c in Store.i.clients) {
+        if (c.name.isEmpty) continue;
+        map[c.name.trim().toLowerCase()] = _ClientSummary(
+          name: c.name,
+          email: c.email,
+          phone: c.phone,
+          address: c.address,
+          gstin: c.gstin,
+          state: c.state,
+        );
       }
+
+      for (final inv in Store.i.all) {
+        if (inv.client.name.isEmpty) continue;
+        final k = inv.client.name.trim().toLowerCase();
+        final s = map.putIfAbsent(
+          k,
+          () => _ClientSummary(
+            name: inv.client.name,
+            email: inv.client.email,
+            phone: inv.client.phone,
+            address: inv.client.address,
+            gstin: inv.client.gstin,
+            state: inv.client.state,
+          ),
+        );
+        s.total++;
+        if (inv.displayStatus == Status.paid) {
+          s.paidCount++;
+        } else if (inv.displayStatus != Status.draft) {
+          s.unpaidAmt += inv.balance;
+        }
+      }
+      _cachedSummary = map.values.toList()..sort((a, b) => a.name.compareTo(b.name));
+      _lastStoreAllCount = Store.i.all.length;
+      _lastStoreClientsCount = Store.i.clients.length;
     }
-    final list = map.values.toList()..sort((a, b) => a.name.compareTo(b.name));
+
+    final list = _cachedSummary!;
     if (_q.isEmpty) return list;
     final q = _q.toLowerCase();
     return list

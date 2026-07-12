@@ -40,26 +40,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     );
   }
 
-  List<Invoice> get _invoices {
-    final key = _client.name.trim().toLowerCase();
-    return Store.i.all
-        .where((i) => i.client.name.trim().toLowerCase() == key)
-        .toList();
-  }
-
-  List<Invoice> get _issuedInvoices => _invoices
-      .where((invoice) => invoice.displayStatus != Status.draft)
-      .toList();
-
-  double get _totalInvoiced =>
-      _issuedInvoices.fold(0, (sum, invoice) => sum + invoice.total);
-
-  double get _totalRevenue =>
-      _issuedInvoices.fold(0, (sum, invoice) => sum + invoice.collectedAmt);
-
-  double get _outstanding => _issuedInvoices
-      .where((invoice) => invoice.displayStatus != Status.paid)
-      .fold(0, (sum, invoice) => sum + invoice.balance);
+  // Getters removed for performance (computed locally in build)
 
   String get _initials {
     final parts =
@@ -118,7 +99,9 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
   }
 
   Future<void> _deleteClient() async {
-    if (_invoices.isNotEmpty) {
+    final key = _client.name.trim().toLowerCase();
+    final hasInvoices = Store.i.all.any((i) => i.client.name.trim().toLowerCase() == key);
+    if (hasInvoices) {
       showAppSnack(context, 'Clients with invoice history cannot be deleted');
       return;
     }
@@ -172,7 +155,12 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final invoices = _invoices;
+    final key = _client.name.trim().toLowerCase();
+    final invoices = Store.i.all.where((i) => i.client.name.trim().toLowerCase() == key).toList();
+    final issuedInvoices = invoices.where((inv) => inv.displayStatus != Status.draft).toList();
+    final totalInvoiced = issuedInvoices.fold(0.0, (sum, inv) => sum + inv.total);
+    final totalRevenue = issuedInvoices.fold(0.0, (sum, inv) => sum + inv.collectedAmt);
+    final outstanding = issuedInvoices.where((inv) => inv.displayStatus != Status.paid).fold(0.0, (sum, inv) => sum + inv.balance);
 
     return Scaffold(
       backgroundColor: T.bg(context),
@@ -228,7 +216,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                   ],
                 ),
               ),
-              if (_invoices.isEmpty)
+              if (invoices.isEmpty)
                 const PopupMenuItem(
                   value: 'delete',
                   child: Row(
@@ -298,7 +286,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
           // ── Statement ──
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: _statementCard(),
+            child: _statementCard(issuedInvoices.length, totalInvoiced, totalRevenue, outstanding),
           ),
 
           const SizedBox(height: 24),
@@ -475,7 +463,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     );
   }
 
-  Widget _statementCard() => Container(
+  Widget _statementCard(int issuedCount, double totalInvoiced, double totalRevenue, double outstanding) => Container(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 15),
         decoration: BoxDecoration(
           color: T.card(context),
@@ -501,7 +489,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                 const SizedBox(width: 10),
                 Flexible(
                   child: Text(
-                    '${_issuedInvoices.length} issued',
+                    '$issuedCount issued',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.right,
@@ -511,19 +499,19 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
               ],
             ),
             const SizedBox(height: 14),
-            _statementRow('Billed', amtUi(_totalInvoiced)),
+            _statementRow('Billed', amtUi(totalInvoiced), outstanding),
             const SizedBox(height: 9),
-            _statementRow('Received', amtUi(_totalRevenue)),
+            _statementRow('Received', amtUi(totalRevenue), outstanding),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Divider(height: 1, color: T.divider(context)),
             ),
-            _statementRow('Balance', amtUi(_outstanding), strong: true),
+            _statementRow('Balance', amtUi(outstanding), outstanding, strong: true),
           ],
         ),
       );
 
-  Widget _statementRow(String label, String value, {bool strong = false}) =>
+  Widget _statementRow(String label, String value, double outstanding, {bool strong = false}) =>
       Row(
         children: [
           Text(
@@ -544,7 +532,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
               style: TextStyle(
                 fontSize: strong ? 15 : 13,
                 fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
-                color: strong && _outstanding > 0
+                color: strong && outstanding > 0
                     ? T.text(context)
                     : T.text(context),
               ),
