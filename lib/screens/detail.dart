@@ -469,9 +469,14 @@ class _DetailPageState extends State<DetailPage> {
                     children: [
                       StatusPill(inv: _inv),
                       const SizedBox(width: 10),
-                      Text(
-                        _inv.dueDateText,
-                        style: TextStyle(color: T.faint(context), fontSize: 12),
+                      Expanded(
+                        child: Text(
+                          _inv.dueDateText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              TextStyle(color: T.faint(context), fontSize: 12),
+                        ),
                       ),
                     ],
                   ),
