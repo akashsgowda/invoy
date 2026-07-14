@@ -452,8 +452,15 @@ class _SkeletonLoaderState extends State<_SkeletonLoader>
     super.initState();
     _ac = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
-    )..repeat(reverse: true);
+      duration: Prefs.reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 900),
+    );
+    if (Prefs.reduceMotion) {
+      _ac.value = 1;
+    } else {
+      _ac.repeat(reverse: true);
+    }
     _pulse = Tween(
       begin: 0.3,
       end: 0.6,

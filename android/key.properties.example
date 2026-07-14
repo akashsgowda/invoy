@@ -1,0 +1,6 @@
+# Copy this file to android/key.properties and replace every placeholder.
+# Keep android/key.properties and the keystore outside Git and backed up safely.
+storePassword=replace-with-a-strong-password
+keyPassword=replace-with-a-strong-password
+keyAlias=invoy-upload
+storeFile=upload-keystore.jks

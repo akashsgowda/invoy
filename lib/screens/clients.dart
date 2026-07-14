@@ -33,13 +33,10 @@ class _ClientsPageState extends State<ClientsPage> {
   }
 
   List<_ClientSummary>? _cachedSummary;
-  int _lastStoreAllCount = -1;
-  int _lastStoreClientsCount = -1;
+  int _lastStoreRevision = -1;
 
   List<_ClientSummary> get _clients {
-    if (_cachedSummary == null ||
-        _lastStoreAllCount != Store.i.all.length ||
-        _lastStoreClientsCount != Store.i.clients.length) {
+    if (_cachedSummary == null || _lastStoreRevision != Store.i.revision) {
       final map = <String, _ClientSummary>{};
 
       for (final c in Store.i.clients) {
@@ -75,9 +72,9 @@ class _ClientsPageState extends State<ClientsPage> {
           s.unpaidAmt += inv.balance;
         }
       }
-      _cachedSummary = map.values.toList()..sort((a, b) => a.name.compareTo(b.name));
-      _lastStoreAllCount = Store.i.all.length;
-      _lastStoreClientsCount = Store.i.clients.length;
+      _cachedSummary = map.values.toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+      _lastStoreRevision = Store.i.revision;
     }
 
     final list = _cachedSummary!;
@@ -146,7 +143,7 @@ class _ClientsPageState extends State<ClientsPage> {
               child: AppSearchField(
                 controller: _searchC,
                 focusNode: _searchFocus,
-                hint: 'Search clients...',
+                hint: 'Search clients',
                 onChanged: (v) => setState(() => _q = v),
                 onClear: () {
                   _searchC.clear();

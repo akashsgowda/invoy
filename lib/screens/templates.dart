@@ -91,7 +91,7 @@ class _TemplateRow extends StatelessWidget {
         onTap: onTap,
         scale: 0.975,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
+          duration: Prefs.reduceMotion ? Duration.zero : kSegmentDuration,
           curve: kSmooth,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -127,7 +127,7 @@ class _TemplateRow extends StatelessWidget {
                 ),
               ),
               AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
+                duration: Prefs.reduceMotion ? Duration.zero : kSegmentDuration,
                 curve: kSmooth,
                 width: 22,
                 height: 22,

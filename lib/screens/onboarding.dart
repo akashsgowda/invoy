@@ -259,11 +259,13 @@ class _WelcomePageState extends State<_WelcomePage>
     super.initState();
     _ac = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 700),
+      duration: Prefs.reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 700),
     )..forward();
     _fade = CurvedAnimation(parent: _ac, curve: kSpring);
     _slide = Tween(
-      begin: 32.0,
+      begin: Prefs.reduceMotion ? 0.0 : 32.0,
       end: 0.0,
     ).animate(CurvedAnimation(parent: _ac, curve: kSpring));
   }
@@ -1045,7 +1047,9 @@ class _OnboardFieldState extends State<_OnboardField> {
           ),
           const SizedBox(height: 8),
           AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: Prefs.reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
             curve: kSmooth,
             height: 52,
             clipBehavior: Clip.antiAlias,

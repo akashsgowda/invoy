@@ -33,4 +33,18 @@ void main() {
     expect(message, contains('Due date: 1 Jul 2026'));
     expect(message, contains('Thank you,\nExample Studio'));
   });
+
+  test('payment reminder never renders a blank invoice number', () {
+    final inv = Invoice(
+      id: 'draft-reminder-test',
+      num: '',
+      date: DateTime(2026, 6, 1),
+      termDays: 30,
+      gst: 0,
+      status: Status.pending,
+      items: [LineItem(id: '1', desc: 'Design', qty: 1, rate: 1000)],
+    );
+
+    expect(paymentReminderMessage(inv), contains('invoice Draft'));
+  });
 }

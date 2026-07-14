@@ -394,7 +394,9 @@ class _DetailPageState extends State<DetailPage> {
       barrierDismissible: false,
       barrierLabel: title,
       barrierColor: Colors.black.withValues(alpha: 0.18),
-      transitionDuration: const Duration(milliseconds: 160),
+      transitionDuration: Prefs.reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 160),
       pageBuilder: (_, __, ___) => _DonePulse(title: title),
       transitionBuilder: (_, animation, __, child) => FadeTransition(
         opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
@@ -1139,7 +1141,7 @@ String paymentReminderMessage(Invoice inv) {
       : Prefs.yourName.value.trim();
   final signoff = sender.isEmpty ? 'Thank you.' : 'Thank you,\n$sender';
   return 'Hi $client,\n\n'
-      'This is a reminder for invoice ${inv.num}.\n'
+      'This is a reminder for invoice ${inv.displayNumber}.\n'
       'Balance due: ${amt(inv.balance)}\n'
       'Due date: ${fDate(inv.due)}\n\n'
       'Please share an update when convenient.\n\n'
@@ -1158,16 +1160,21 @@ class _DonePulseState extends State<_DonePulse> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 900), () {
-      if (mounted) Navigator.of(context).pop();
-    });
+    Future.delayed(
+      Prefs.reduceMotion ? Duration.zero : const Duration(milliseconds: 900),
+      () {
+        if (mounted) Navigator.of(context).pop();
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) => Center(
         child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.76, end: 1),
-          duration: const Duration(milliseconds: 260),
+          tween: Tween(begin: Prefs.reduceMotion ? 1.0 : 0.76, end: 1),
+          duration: Prefs.reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 260),
           curve: kSmooth,
           builder: (_, scale, child) =>
               Transform.scale(scale: scale, child: child),

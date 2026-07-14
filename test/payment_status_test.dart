@@ -169,6 +169,26 @@ void main() {
     expect(inv.total, 1000);
   });
 
+  test('turning GST back on preserves item tax rates', () {
+    final inv = Invoice(
+      id: 'gst-restore-test',
+      num: 'INV-GST-RESTORE',
+      gst: 18,
+      items: [
+        LineItem(id: '1', desc: 'Goods', qty: 1, rate: 1000, gstRate: 5),
+        LineItem(id: '2', desc: 'Service', qty: 1, rate: 1000, gstRate: 18),
+      ],
+    );
+
+    expect(inv.tax, 230);
+
+    inv.gst = 0;
+    expect(inv.tax, 0);
+
+    inv.gst = 18;
+    expect(inv.tax, 230);
+  });
+
   test('CGST and SGST split mixed item GST rates equally', () {
     final inv = Invoice(
       id: 'split-gst-test',

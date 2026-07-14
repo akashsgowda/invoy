@@ -86,6 +86,7 @@ class _BootstrapRootState extends State<_BootstrapRoot> {
   Future<void> _bootstrap() async {
     await DB.init().timeout(const Duration(seconds: 10));
     await Prefs.load().timeout(const Duration(seconds: 4));
+    await Store.i.load();
   }
 
   void _retry() {

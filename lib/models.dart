@@ -1569,6 +1569,7 @@ class Store {
   double _totalOverdue = 0;
   bool _loaded = false;
   Future<void>? _loadFuture;
+  int _revision = 0;
 
   Future<void> load() {
     if (_loaded) return Future.value();
@@ -1622,6 +1623,7 @@ class Store {
     _totalOverdue = overdueAmount;
     _clientView = UnmodifiableListView(_buildClients());
     _savedItemView = UnmodifiableListView(_savedItems);
+    _revision++;
   }
 
   List<Invoice> get all => _allView;
@@ -1633,6 +1635,7 @@ class Store {
   double get totalPending => _totalPending;
   double get totalOverdue => _totalOverdue;
   bool get isLoaded => _loaded;
+  int get revision => _revision;
 
   Future<Invoice> create() async {
     return Invoice(

@@ -357,86 +357,90 @@ class AppSearchField extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final focused = focusNode.hasFocus;
-    final hasText = controller.text.isNotEmpty;
-    return AnimatedContainer(
-      duration: Prefs.reduceMotion
-          ? Duration.zero
-          : const Duration(milliseconds: 180),
-      curve: kSmooth,
-      height: 50,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: focused ? T.surface(context) : T.card(context),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: focused
-              ? T.accent(context).withValues(alpha: 0.26)
-              : T.border(context).withValues(alpha: 0.78),
-          width: 0.7,
-        ),
-        boxShadow: focused
-            ? T.glow(context)
-            : (T.dark(context) ? const [] : T.softShadow(context)),
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 15),
-          Icon(
-            Icons.search_rounded,
-            size: 19,
-            color: focused ? T.text(context) : T.muted(context),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              focusNode: focusNode,
-              controller: controller,
-              autofocus: autofocus,
-              onChanged: onChanged,
-              style: TextStyle(color: T.text(context), fontSize: 14),
-              decoration: InputDecoration(
-                isCollapsed: true,
-                filled: false,
-                hintText: hint,
-                hintStyle: TextStyle(color: T.faint(context), fontSize: 14),
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                disabledBorder: InputBorder.none,
-              ),
-            ),
-          ),
-          AnimatedSwitcher(
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: Listenable.merge([controller, focusNode]),
+        builder: (context, _) {
+          final focused = focusNode.hasFocus;
+          final hasText = controller.text.isNotEmpty;
+          return AnimatedContainer(
             duration: Prefs.reduceMotion
                 ? Duration.zero
-                : const Duration(milliseconds: 140),
-            switchInCurve: kSmooth,
-            switchOutCurve: Curves.easeInCubic,
-            child: hasText && onClear != null
-                ? SpringTap(
-                    key: const ValueKey('clear'),
-                    onTap: onClear,
-                    scale: 0.9,
-                    child: Padding(
-                      padding: const EdgeInsets.all(13),
-                      child: Icon(
-                        Icons.close_rounded,
-                        size: 16,
-                        color: T.muted(context),
-                      ),
+                : const Duration(milliseconds: 180),
+            curve: kSmooth,
+            height: 50,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: focused ? T.surface(context) : T.card(context),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: focused
+                    ? T.accent(context).withValues(alpha: 0.26)
+                    : T.border(context).withValues(alpha: 0.78),
+                width: 0.7,
+              ),
+              boxShadow: focused
+                  ? T.glow(context)
+                  : (T.dark(context) ? const [] : T.softShadow(context)),
+            ),
+            child: Row(
+              children: [
+                const SizedBox(width: 15),
+                Icon(
+                  Icons.search_rounded,
+                  size: 19,
+                  color: focused ? T.text(context) : T.muted(context),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    focusNode: focusNode,
+                    controller: controller,
+                    autofocus: autofocus,
+                    onChanged: onChanged,
+                    style: TextStyle(color: T.text(context), fontSize: 14),
+                    decoration: InputDecoration(
+                      isCollapsed: true,
+                      filled: false,
+                      hintText: hint,
+                      hintStyle:
+                          TextStyle(color: T.faint(context), fontSize: 14),
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      disabledBorder: InputBorder.none,
                     ),
-                  )
-                : const SizedBox(
-                    key: ValueKey('empty'),
-                    width: 15,
                   ),
-          ),
-        ],
-      ),
-    );
-  }
+                ),
+                AnimatedSwitcher(
+                  duration: Prefs.reduceMotion
+                      ? Duration.zero
+                      : const Duration(milliseconds: 140),
+                  switchInCurve: kSmooth,
+                  switchOutCurve: Curves.easeInCubic,
+                  child: hasText && onClear != null
+                      ? SpringTap(
+                          key: const ValueKey('clear'),
+                          onTap: onClear,
+                          scale: 0.9,
+                          child: Padding(
+                            padding: const EdgeInsets.all(13),
+                            child: Icon(
+                              Icons.close_rounded,
+                              size: 16,
+                              color: T.muted(context),
+                            ),
+                          ),
+                        )
+                      : const SizedBox(
+                          key: ValueKey('empty'),
+                          width: 15,
+                        ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
 }
 
 enum AppButtonTone { primary, secondary, ghost, danger }
@@ -854,11 +858,13 @@ class _EmptyStateState extends State<EmptyState>
     super.initState();
     _ac = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: Prefs.reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 500),
     )..forward();
     _fade = CurvedAnimation(parent: _ac, curve: kSmooth);
     _slide = Tween(
-      begin: 14.0,
+      begin: Prefs.reduceMotion ? 0.0 : 14.0,
       end: 0.0,
     ).animate(CurvedAnimation(parent: _ac, curve: kSmooth));
   }

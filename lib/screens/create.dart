@@ -250,7 +250,7 @@ class _CreatePageState extends State<CreatePage> {
     if (item != null && mounted) {
       setState(() => _inv!.items.add(item));
       try {
-      await Store.i.saveSavedItem(item);
+        await Store.i.saveSavedItem(item);
       } catch (_) {
         // The invoice item is still valid if the reusable catalog cannot save.
       }
@@ -742,13 +742,7 @@ class _MoreOptionsPage extends StatefulWidget {
 class _MoreOptionsPageState extends State<_MoreOptionsPage> {
   Invoice get inv => widget.inv;
 
-  String get _gstLabel {
-    if (inv.gst == 0) return 'No GST';
-    if (inv.splitGst) {
-      return '${_pct(inv.gst)}% (CGST ${_pct(inv.gst / 2)}% + SGST ${_pct(inv.gst / 2)}%)';
-    }
-    return '${_pct(inv.gst)}% IGST';
-  }
+  String get _gstLabel => inv.gst > 0 ? 'GST invoice' : 'No GST';
 
   String get _taxTypeLabel => inv.splitGst ? 'CGST + SGST' : 'IGST';
 
@@ -789,27 +783,27 @@ class _MoreOptionsPageState extends State<_MoreOptionsPage> {
   }
 
   Future<void> _pickGst() async {
-    final opts = [0.0, 5.0, 12.0, 18.0, 28.0];
-    final labels = ['No GST', '5%', '12%', '18%', '28%'];
     await showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => PickSheet(
-        title: 'GST Rate',
-        items: labels,
+        title: 'GST',
+        items: const ['No GST', 'GST invoice'],
         dark: T.dark(context),
-        sel: opts.indexWhere((x) => x == inv.gst).clamp(0, 4),
+        sel: inv.gst > 0 ? 1 : 0,
         onSel: (i) {
-          final oldGst = inv.gst;
-          final nextGst = opts[i];
+          final wasEnabled = inv.gst > 0;
           setState(() {
-            inv.gst = nextGst;
-            for (final item in inv.items) {
-              final itemRate = item.gstRate;
-              final followsOldDefault =
-                  itemRate == null || (itemRate - oldGst).abs() < 0.001;
-              if (nextGst == 0 || oldGst == 0 || followsOldDefault) {
-                item.gstRate = nextGst;
+            if (i == 0) {
+              inv.gst = 0;
+            } else {
+              final defaultRate =
+                  Prefs.defaultGst > 0 ? Prefs.defaultGst : 18.0;
+              inv.gst = defaultRate;
+              if (!wasEnabled) {
+                for (final item in inv.items) {
+                  item.gstRate ??= defaultRate;
+                }
               }
             }
           });
@@ -1307,14 +1301,16 @@ class _DiscountSheetState extends State<_DiscountSheet> {
   Widget _discountMode(String label, bool percent) {
     final active = _isPercent == percent;
     return Expanded(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+      child: SpringTap(
+        haptic: false,
         onTap: () => setState(() {
           _isPercent = percent;
           _error = null;
         }),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: Prefs.reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 180),
           curve: kSmooth,
           alignment: Alignment.center,
           decoration: BoxDecoration(
@@ -1560,7 +1556,7 @@ class _ClientPickerPageState extends State<_ClientPickerPage> {
             child: AppSearchField(
               controller: _searchC,
               focusNode: _searchFocus,
-              hint: 'Search clients...',
+              hint: 'Search clients',
               onChanged: (v) => setState(() => _q = v),
               onClear: () {
                 _searchC.clear();
@@ -1801,9 +1797,16 @@ class _AddItemPageState extends State<_AddItemPage> {
   late final TextEditingController _unitC;
   late final TextEditingController _qtyC;
   late final TextEditingController _rateC;
-  late final TextEditingController _gstC;
+  late double? _itemGstRate;
   late bool _showTaxDetails;
   bool get _editing => widget.item != null;
+  bool get _hasGst => widget.defaultGst > 0;
+  double get _selectedGstRate => _itemGstRate ?? widget.defaultGst;
+
+  String get _gstLabel {
+    final rate = _selectedGstRate;
+    return rate <= 0 ? 'No GST' : '${_pct(rate)}%';
+  }
 
   @override
   void initState() {
@@ -1816,10 +1819,11 @@ class _AddItemPageState extends State<_AddItemPage> {
     _rateC = TextEditingController(
       text: item == null || item.rate == 0 ? '' : _numInput(item.rate),
     );
-    final gst = item?.gstRate ?? widget.defaultGst;
-    _gstC = TextEditingController(text: _numInput(gst));
-    _showTaxDetails = (item?.hsnSac.trim().isNotEmpty ?? false) ||
-        (Prefs.gstNum.value.trim().isNotEmpty && gst > 0);
+    _itemGstRate = item?.gstRate;
+    if (_hasGst && _itemGstRate == null) {
+      _itemGstRate = widget.defaultGst;
+    }
+    _showTaxDetails = _hasGst && (item?.hsnSac.trim().isNotEmpty ?? false);
   }
 
   @override
@@ -1829,7 +1833,6 @@ class _AddItemPageState extends State<_AddItemPage> {
     _unitC.dispose();
     _qtyC.dispose();
     _rateC.dispose();
-    _gstC.dispose();
     super.dispose();
   }
 
@@ -1868,21 +1871,15 @@ class _AddItemPageState extends State<_AddItemPage> {
       _hsnC.text = item.hsnSac;
       _unitC.text = item.unit;
       _rateC.text = item.rate == 0 ? '' : _numInput(item.rate);
-      _gstC.text = _numInput(item.gstRate);
       _qtyC.text = '1';
-      _showTaxDetails = item.hsnSac.trim().isNotEmpty ||
-          (Prefs.gstNum.value.trim().isNotEmpty && item.gstRate > 0);
+      _itemGstRate = item.gstRate;
+      _showTaxDetails = _hasGst && item.hsnSac.trim().isNotEmpty;
     });
   }
 
   String get _unitLabel {
     final value = _unitC.text.trim();
     return value.isEmpty ? 'Nos' : value;
-  }
-
-  String get _gstLabel {
-    final rate = _numberValue(_gstC.text, fallback: widget.defaultGst);
-    return rate <= 0 ? 'No GST' : '${_pct(rate)}%';
   }
 
   bool _isKnownUnit(String value) {
@@ -1935,7 +1932,7 @@ class _AddItemPageState extends State<_AddItemPage> {
   }
 
   Future<void> _pickItemGst() async {
-    final current = _numberValue(_gstC.text, fallback: widget.defaultGst);
+    final current = _selectedGstRate;
     final picked = await showModalBottomSheet<double>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1967,11 +1964,11 @@ class _AddItemPageState extends State<_AddItemPage> {
         showAppSnack(context, 'GST rate must be between 0 and 100');
         return;
       }
-      setState(() => _gstC.text = _numInput(rate));
+      setState(() => _itemGstRate = rate);
       return;
     }
 
-    setState(() => _gstC.text = _numInput(picked));
+    setState(() => _itemGstRate = picked);
   }
 
   @override
@@ -2128,46 +2125,24 @@ class _AddItemPageState extends State<_AddItemPage> {
 
           const SizedBox(height: 20),
 
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _fieldLabel('Rate (₹)'),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _rateC,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: [
-                        LengthLimitingTextInputFormatter(24),
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-                      ],
-                      style: TextStyle(color: T.text(context), fontSize: 14),
-                      onChanged: (_) => setState(() {}),
-                      decoration: _fieldDecoration('0'),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _fieldLabel('GST rate'),
-                    const SizedBox(height: 8),
-                    _gstPicker(),
-                  ],
-                ),
-              ),
+          _fieldLabel('Rate (₹)'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _rateC,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              LengthLimitingTextInputFormatter(24),
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
             ],
+            style: TextStyle(color: T.text(context), fontSize: 14),
+            onChanged: (_) => setState(() {}),
+            decoration: _fieldDecoration('0'),
           ),
 
-          const SizedBox(height: 20),
-          _taxDetailsBlock(),
+          if (_hasGst) ...[
+            const SizedBox(height: 20),
+            _taxDetailsBlock(),
+          ],
 
           if (hasAmount) ...[
             const SizedBox(height: 20),
@@ -2209,7 +2184,7 @@ class _AddItemPageState extends State<_AddItemPage> {
               }
               final q = _numberValue(_qtyC.text, fallback: 1);
               final r = _numberValue(_rateC.text);
-              final gst = _numberValue(_gstC.text, fallback: widget.defaultGst);
+              final gst = _hasGst ? _selectedGstRate : _itemGstRate;
               if (q <= 0) {
                 showAppSnack(context, 'Quantity must be above zero');
                 return;
@@ -2227,7 +2202,7 @@ class _AddItemPageState extends State<_AddItemPage> {
                 showAppSnack(context, 'Item amount is too large');
                 return;
               }
-              if (gst < 0 || gst > 100) {
+              if (gst != null && (gst < 0 || gst > 100)) {
                 showAppSnack(context, 'GST rate must be between 0 and 100');
                 return;
               }
@@ -2327,8 +2302,6 @@ class _AddItemPageState extends State<_AddItemPage> {
 
   Widget _taxDetailsBlock() {
     final hasHsn = _hsnC.text.trim().isNotEmpty;
-    final shouldNudge = Prefs.gstNum.value.trim().isNotEmpty &&
-        _numberValue(_gstC.text, fallback: widget.defaultGst) > 0;
 
     return Container(
       decoration: BoxDecoration(
@@ -2360,10 +2333,8 @@ class _AddItemPageState extends State<_AddItemPage> {
                         const SizedBox(height: 3),
                         Text(
                           hasHsn
-                              ? 'HSN/SAC ${_hsnC.text.trim()}'
-                              : shouldNudge
-                                  ? 'HSN/SAC for GST invoices'
-                                  : 'Optional HSN/SAC code',
+                              ? '$_gstLabel GST · HSN/SAC ${_hsnC.text.trim()}'
+                              : '$_gstLabel GST · Add HSN/SAC',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style:
@@ -2390,6 +2361,10 @@ class _AddItemPageState extends State<_AddItemPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _fieldLabel('GST rate'),
+                  const SizedBox(height: 8),
+                  _gstPicker(),
+                  const SizedBox(height: 20),
                   _fieldLabel('HSN/SAC'),
                   const SizedBox(height: 8),
                   TextField(
@@ -2405,7 +2380,7 @@ class _AddItemPageState extends State<_AddItemPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Use HSN for goods, SAC for services. Leave blank if this is not a GST invoice.',
+                    'Use HSN for goods and SAC for services.',
                     style: TextStyle(
                       color: T.muted(context),
                       fontSize: 11,
@@ -2566,7 +2541,7 @@ class _GstRatePickerSheet extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Use the common slab unless this item needs a special rate.',
+            'Choose the rate for this item.',
             style: TextStyle(color: T.muted(context), fontSize: 12),
           ),
           const SizedBox(height: 16),
@@ -2677,10 +2652,13 @@ class _TplPickerState extends State<_TplPicker> {
               itemBuilder: (_, i) {
                 final t = kTemplates[i];
                 final active = _sel == t.name;
-                return GestureDetector(
+                return SpringTap(
+                  haptic: false,
                   onTap: () => setState(() => _sel = t.name),
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
+                    duration: Prefs.reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 200),
                     curve: kSmooth,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
