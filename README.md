@@ -1,8 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.png" width="56" alt="Invoy logo">
-
-# Invoy
+# <img src="assets/logo.png" width="32" alt="Invoy logo"> Invoy
 
 **Local-first invoicing for freelancers and small businesses.**
 
